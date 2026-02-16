@@ -198,6 +198,7 @@ function spawnFirework(x, y) {
 // --- Input ---
 let keys = {};
 let touchTargetX = null; // finger X position — unicorn follows horizontally
+let touchActive = false;
 
 document.addEventListener('keydown', e => {
   keys[e.key.toLowerCase()] = true;
@@ -220,13 +221,14 @@ canvas.addEventListener('pointerdown', e => {
   }
   // Playing: unicorn follows finger horizontally
   touchTargetX = e.clientX;
+  touchActive = true;
 });
 canvas.addEventListener('pointermove', e => {
   if (gameState !== 'playing') return;
-  touchTargetX = e.clientX;
+  if (touchActive) touchTargetX = e.clientX;
 });
-canvas.addEventListener('pointerup', e => { touchTargetX = null; });
-canvas.addEventListener('pointercancel', e => { touchTargetX = null; });
+canvas.addEventListener('pointerup', e => { touchActive = false; });
+canvas.addEventListener('pointercancel', e => { touchActive = false; });
 
 // --- Name Entry ---
 function handleNameClick(cx, cy) {
@@ -322,14 +324,14 @@ function update(dt) {
   if (keys['arrowright'] || keys['d']) moveDir = 1;
 
   // Touch: smoothly move toward finger X position
-  if (touchTargetX !== null) {
+  if (touchActive && touchTargetX !== null) {
     const dx = touchTargetX - unicorn.x;
-    if (Math.abs(dx) > 3) {
-      unicorn.x += dx * 8 * dt; // smooth follow
+    if (Math.abs(dx) > 2) {
+      unicorn.x += dx * 6 * dt; // smooth follow
     }
-  } else {
-    unicorn.x += moveDir * UNICORN_MOVE_SPEED * dt;
   }
+  // Keyboard always works too
+  unicorn.x += moveDir * UNICORN_MOVE_SPEED * dt;
   unicorn.x = Math.max(0.05, Math.min(0.95, unicorn.x));
 
   // Trail
