@@ -14,49 +14,36 @@ canvas { display:block; width:100%; height:100%; }
 <canvas id="c"></canvas>
 <script>
 // ============================================================
-// 🦄 EATING UNICORN RAINBOWS — A Magical Game for Kids 🌈
+// 🦄 EATING UNICORN RAINBOWS — Vertical Racer Edition 🌈
 // ============================================================
 
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 
-// --- Resize ---
 let W, H;
-function resize() {
-  W = canvas.width = window.innerWidth;
-  H = canvas.height = window.innerHeight;
-}
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
 resize();
 window.addEventListener('resize', resize);
 
-// --- Audio Engine ---
+// --- Audio ---
 let audioCtx;
-function initAudio() {
-  if (audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-}
+function initAudio() { if (audioCtx) return; audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
 
 function playChime(freq, dur=0.15, vol=0.12, type='sine') {
   if (!audioCtx) return;
-  const o = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
-  o.type = type;
-  o.frequency.value = freq;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq;
   g.gain.setValueAtTime(vol, audioCtx.currentTime);
   g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
   o.connect(g); g.connect(audioCtx.destination);
   o.start(); o.stop(audioCtx.currentTime + dur);
 }
 
-function playEatSound(combo) {
-  const base = 523 + combo * 60; // C5 + ascending
+function playEatSound(pts) {
+  const base = pts >= 100 ? 880 : pts >= 50 ? 660 : 523;
   playChime(base, 0.2, 0.1);
   setTimeout(() => playChime(base * 1.25, 0.15, 0.08), 50);
-  setTimeout(() => playChime(base * 1.5, 0.12, 0.06), 100);
-}
-
-function playPowerUp() {
-  [660,880,1100,1320].forEach((f,i) => setTimeout(() => playChime(f, 0.2, 0.1), i*80));
+  if (pts >= 50) setTimeout(() => playChime(base * 1.5, 0.12, 0.06), 100);
 }
 
 function playWinFanfare() {
@@ -64,7 +51,6 @@ function playWinFanfare() {
   notes.forEach((f,i) => setTimeout(() => playChime(f, 0.4, 0.12, i%2?'sine':'triangle'), i*150));
 }
 
-// Simple background melody
 let melodyInterval;
 function startMelody() {
   if (melodyInterval) return;
@@ -73,36 +59,70 @@ function startMelody() {
   melodyInterval = setInterval(() => {
     if (gameState !== 'playing') return;
     playChime(scale[idx % scale.length], 0.3, 0.03, 'triangle');
-    if (Math.random() < 0.3) playChime(scale[idx % scale.length] * 1.5, 0.2, 0.02, 'sine');
     idx++;
   }, 600);
 }
-
 function stopMelody() { clearInterval(melodyInterval); melodyInterval = null; }
+
+// --- Seeded Random for track layout ---
+function seededRandom(seed) {
+  let s = seed;
+  return function() {
+    s = (s * 1664525 + 1013904223) & 0xFFFFFFFF;
+    return (s >>> 0) / 0xFFFFFFFF;
+  };
+}
+
+// --- Track Generation ---
+const TRACK_LENGTH = 10000;
+const TRACK_SEED = 42069;
+let trackRainbows = []; // {y, x, type} - y is distance along track (0=start, TRACK_LENGTH=end)
+
+function generateTrack() {
+  const rng = seededRandom(TRACK_SEED);
+  trackRainbows = [];
+  // Place rainbows along the track
+  // Small rainbows: frequent, big: occasional, gold: rare
+  for (let y = 200; y < TRACK_LENGTH - 200; y += 60) {
+    const r = rng();
+    if (r < 0.45) {
+      // small rainbow (10 pts) — most common
+      trackRainbows.push({ y, x: rng() * 0.8 + 0.1, type: 'small', points: 10 });
+    } else if (r < 0.58) {
+      // big rainbow (50 pts)
+      trackRainbows.push({ y, x: rng() * 0.8 + 0.1, type: 'big', points: 50 });
+    } else if (r < 0.62) {
+      // gold rainbow (100 pts)
+      trackRainbows.push({ y, x: rng() * 0.8 + 0.1, type: 'gold', points: 100 });
+    }
+    // else: empty space
+  }
+  // Also generate some star decorations (non-collectible background)
+  trackStars = [];
+  for (let y = 0; y < TRACK_LENGTH; y += 30) {
+    if (rng() < 0.3) {
+      trackStars.push({ y, x: rng(), size: rng()*2+1, twinkleOffset: rng()*Math.PI*2 });
+    }
+  }
+}
+
+let trackStars = [];
 
 // --- Leaderboard ---
 let leaderboard = [];
-let personalBests = JSON.parse(localStorage.getItem('unicorn_bests') || '[]');
 let showingNameEntry = false;
 let pendingScore = 0;
 let nameInput = '';
-let nameInputCursor = 0;
 
 async function fetchLeaderboard() {
   try {
     const r = await fetch('/api/scores');
     const d = await r.json();
     if (d.scores) leaderboard = d.scores;
-  } catch(e) { console.log('Leaderboard offline, using local only'); }
+  } catch(e) { console.log('Leaderboard offline'); }
 }
 
 async function submitScore(name, sc) {
-  // Save locally
-  personalBests.push({ name, score: sc, date: `${new Date().getMonth()+1}/${new Date().getDate()}` });
-  personalBests.sort((a,b) => b.score - a.score);
-  personalBests = personalBests.slice(0, 10);
-  localStorage.setItem('unicorn_bests', JSON.stringify(personalBests));
-  // Submit globally
   try {
     const r = await fetch('/api/scores', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -116,107 +136,37 @@ async function submitScore(name, sc) {
 fetchLeaderboard();
 
 // --- Game State ---
-let gameState = 'title'; // title, playing, win, lose
-const GAME_DURATION = 120; // 2 minutes (more fun than 10 for kids)
-const WIN_ENERGY = 100;
-let timer = GAME_DURATION;
-let energy = 0;
+let gameState = 'title'; // title, playing, win
 let score = 0;
-let combo = 0;
-let comboTimer = 0;
-let shakeAmount = 0;
-let flashAlpha = 0;
-let globalSparkle = 0; // 0-1 progressive enhancement
+let distance = 0; // how far along the track (0 to TRACK_LENGTH)
 let titleTime = 0;
 let winTime = 0;
+let collectedSet = new Set(); // indices of collected rainbows
+
+// Speed: units per second. TRACK_LENGTH=10000, want ~90 seconds → ~111 units/sec
+const BASE_SPEED = 110;
 
 // --- Unicorn ---
 const unicorn = {
-  x: 0, y: 0, targetX: 0, targetY: 0, angle: 0,
-  speed: 5, baseSpeed: 5, sparkle: 0, scale: 1,
-  trail: [], orbStars: [], blinkTimer: 0, expression: 'happy',
-  powerTimer: 0, // star power remaining
+  x: 0.5, // 0-1 horizontal position (fraction of screen width)
+  trail: [],
+  sparkle: 0,
+  blinkTimer: 3,
 };
 
-// --- Entities ---
-let swirls = [];
-let powerups = [];
+const UNICORN_MOVE_SPEED = 1.8; // fraction of screen per second
+let moveDir = 0; // -1, 0, 1
+
+// --- Particles & effects ---
 let particles = [];
-let bgStars = [];
-let clouds = [];
 let fireworks = [];
+let bgClouds = [];
 
-// --- Input ---
-let keys = {};
-let mouseTarget = null;
-let touching = false;
-
-document.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; initAudio(); });
-document.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
-
-canvas.addEventListener('pointerdown', e => {
-  initAudio();
-  if (gameState === 'title') { startGame(); return; }
-  if (gameState === 'win' || gameState === 'lose') {
-    if (showingNameEntry) {
-      handleNameClick(e.clientX, e.clientY);
-      return;
-    }
-    if (gameState === 'win' && winTime > 1.5 && !showingNameEntry && !window._nameSubmitted) {
-      // Show name entry
-      showingNameEntry = true;
-      pendingScore = score;
-      nameInput = '';
-      return;
-    }
-    if (winTime > 2 && window._nameSubmitted) { window._nameSubmitted = false; resetToTitle(); }
-    return;
+function initBGClouds() {
+  bgClouds = [];
+  for (let i = 0; i < 8; i++) {
+    bgClouds.push({ x: Math.random(), y: Math.random()*H, w: Math.random()*150+80, alpha: Math.random()*0.15+0.05 });
   }
-  mouseTarget = { x: e.clientX, y: e.clientY };
-  touching = true;
-});
-canvas.addEventListener('pointermove', e => {
-  if (touching && gameState === 'playing') mouseTarget = { x: e.clientX, y: e.clientY };
-});
-canvas.addEventListener('pointerup', () => { touching = false; });
-
-// --- Init BG ---
-function initBG() {
-  bgStars = [];
-  for (let i = 0; i < 80; i++) {
-    bgStars.push({ x: Math.random()*2000, y: Math.random()*2000, size: Math.random()*2.5+0.5, twinkle: Math.random()*Math.PI*2, speed: Math.random()*0.02+0.01 });
-  }
-  clouds = [];
-  for (let i = 0; i < 6; i++) {
-    clouds.push({ x: Math.random()*2000, y: Math.random()*H*0.5, w: Math.random()*200+100, speed: Math.random()*0.3+0.1, alpha: Math.random()*0.3+0.1 });
-  }
-}
-
-// --- Spawn ---
-function spawnSwirl() {
-  const isGold = Math.random() < 0.08;
-  const colors = ['#ff6b9d','#c44dff','#4dc9ff','#ff9e4d','#4dff88','#ff4d8b'];
-  swirls.push({
-    x: Math.random() * W, y: Math.random() * H,
-    radius: 18 + Math.random()*12,
-    rotation: Math.random() * Math.PI * 2,
-    rotSpeed: (Math.random()-0.5) * 0.05,
-    color: isGold ? '#ffd700' : colors[Math.floor(Math.random()*colors.length)],
-    isGold, alpha: 0, fadeIn: true,
-    bobPhase: Math.random() * Math.PI * 2,
-    points: isGold ? 15 : 5,
-    life: 1,
-  });
-}
-
-function spawnPowerup() {
-  const types = ['star','heart','cloud'];
-  const type = types[Math.floor(Math.random()*types.length)];
-  powerups.push({
-    x: Math.random()*W, y: Math.random()*H,
-    type, radius: 22, alpha: 0, fadeIn: true,
-    bobPhase: Math.random()*Math.PI*2, life: 1,
-  });
 }
 
 function spawnParticles(x, y, color, count=8, spread=3) {
@@ -239,166 +189,148 @@ function spawnFirework(x, y) {
     const angle = Math.random()*Math.PI*2;
     const speed = Math.random()*6+2;
     fireworks.push({
-      x, y, vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed - 2,
+      x, y, vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed-2,
       life: 1, decay: 0.01+Math.random()*0.015, color: c, size: Math.random()*4+2,
     });
   }
 }
 
-// --- Name Entry Click Handler ---
+// --- Input ---
+let keys = {};
+let touchLeft = false, touchRight = false;
+
+document.addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  initAudio();
+  if (showingNameEntry) {
+    if (e.key === 'Backspace') { nameInput = nameInput.slice(0,-1); e.preventDefault(); return; }
+    if (e.key === 'Enter' && nameInput.length > 0) { finishNameEntry(); return; }
+    if (/^[a-zA-Z0-9 ]$/.test(e.key) && nameInput.length < 12) { nameInput += e.key.toUpperCase(); }
+  }
+});
+document.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+canvas.addEventListener('pointerdown', e => {
+  initAudio();
+  if (gameState === 'title') { startGame(); return; }
+  if (gameState === 'win') {
+    if (showingNameEntry) { handleNameClick(e.clientX, e.clientY); return; }
+    if (winTime > 2) { resetToTitle(); return; }
+    return;
+  }
+  // Playing: left/right
+  if (e.clientX < W/2) touchLeft = true; else touchRight = true;
+});
+canvas.addEventListener('pointermove', e => {
+  if (gameState !== 'playing') return;
+  // Update touch position in case finger slides
+});
+canvas.addEventListener('pointerup', e => { touchLeft = false; touchRight = false; });
+canvas.addEventListener('pointercancel', e => { touchLeft = false; touchRight = false; });
+
+// --- Name Entry ---
 function handleNameClick(cx, cy) {
   const kb = window._nameKB;
   if (!kb) return;
   const { letters, btnSize, btnPad, rowLen, kbStartX, kbStartY, ctrlY, ctrlBtnW } = kb;
-
-  // Check letter buttons
   for (let i = 0; i < letters.length; i++) {
     const row = Math.floor(i / rowLen);
     const col = i % rowLen;
     const bx = kbStartX + col * (btnSize + btnPad);
     const by = kbStartY + row * (btnSize + btnPad);
     if (cx >= bx && cx <= bx+btnSize && cy >= by && cy <= by+btnSize) {
-      if (nameInput.length < 12) {
-        nameInput += letters[i];
-        playChime(400 + i*20, 0.1, 0.08);
-      }
+      if (nameInput.length < 12) { nameInput += letters[i]; playChime(400+i*20, 0.1, 0.08); }
       return;
     }
   }
-
-  // Delete button
-  if (cx >= W/2 - ctrlBtnW - 10 && cx <= W/2 - 10 && cy >= ctrlY && cy <= ctrlY + btnSize + 4) {
-    nameInput = nameInput.slice(0, -1);
-    playChime(300, 0.1, 0.06);
-    return;
+  if (cx >= W/2-ctrlBtnW-10 && cx <= W/2-10 && cy >= ctrlY && cy <= ctrlY+btnSize+4) {
+    nameInput = nameInput.slice(0,-1); playChime(300, 0.1, 0.06); return;
   }
-
-  // Done button
-  if (cx >= W/2 + 10 && cx <= W/2 + 10 + ctrlBtnW && cy >= ctrlY && cy <= ctrlY + btnSize + 4) {
-    if (nameInput.length > 0) {
-      submitScore(nameInput, pendingScore);
-      showingNameEntry = false;
-      window._nameSubmitted = true;
-      winTime = 0; // reset so they see the win screen with leaderboard
-      playChime(800, 0.3, 0.1);
-    }
+  if (cx >= W/2+10 && cx <= W/2+10+ctrlBtnW && cy >= ctrlY && cy <= ctrlY+btnSize+4) {
+    if (nameInput.length > 0) finishNameEntry();
     return;
   }
 }
 
-// Also support physical keyboard for name entry
-document.addEventListener('keydown', e => {
-  if (!showingNameEntry) return;
-  if (e.key === 'Backspace') { nameInput = nameInput.slice(0, -1); e.preventDefault(); return; }
-  if (e.key === 'Enter' && nameInput.length > 0) {
-    submitScore(nameInput, pendingScore);
-    showingNameEntry = false;
-    window._nameSubmitted = true;
-    winTime = 0;
-    return;
-  }
-  if (/^[a-zA-Z0-9 ]$/.test(e.key) && nameInput.length < 12) {
-    nameInput += e.key.toUpperCase();
-  }
-});
+function finishNameEntry() {
+  submitScore(nameInput, pendingScore);
+  showingNameEntry = false;
+  window._nameSubmitted = true;
+  winTime = 0;
+  playChime(800, 0.3, 0.1);
+}
 
 // --- Game Flow ---
 function startGame() {
   gameState = 'playing';
-  timer = GAME_DURATION;
-  energy = 0; score = 0; combo = 0; comboTimer = 0;
-  shakeAmount = 0; flashAlpha = 0; globalSparkle = 0;
-  unicorn.x = W/2; unicorn.y = H/2;
-  unicorn.targetX = W/2; unicorn.targetY = H/2;
-  unicorn.trail = []; unicorn.orbStars = [];
-  unicorn.sparkle = 0; unicorn.powerTimer = 0;
-  swirls = []; powerups = []; particles = []; fireworks = [];
-  for (let i = 0; i < 8; i++) spawnSwirl();
+  score = 0; distance = 0;
+  unicorn.x = 0.5; unicorn.trail = []; unicorn.sparkle = 0;
+  collectedSet = new Set();
+  particles = []; fireworks = [];
+  generateTrack();
   startMelody();
 }
 
 function resetToTitle() {
   gameState = 'title'; titleTime = 0;
   stopMelody();
-  swirls = []; powerups = []; particles = []; fireworks = [];
+  particles = []; fireworks = [];
+  fetchLeaderboard();
 }
 
 // --- Update ---
 let lastTime = 0;
 function update(dt) {
   if (gameState === 'title') { titleTime += dt; return; }
-  if (gameState === 'win' || gameState === 'lose') {
+  if (gameState === 'win') {
     winTime += dt;
-    // fireworks in win
-    if (gameState === 'win' && Math.random() < 0.15) {
-      spawnFirework(Math.random()*W, Math.random()*H*0.6);
-    }
+    if (Math.random() < 0.15) spawnFirework(Math.random()*W, Math.random()*H*0.6);
     fireworks.forEach(f => { f.x += f.vx; f.y += f.vy; f.vy += 0.05; f.life -= f.decay; });
     fireworks = fireworks.filter(f => f.life > 0);
     particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.life -= p.decay; });
     particles = particles.filter(p => p.life > 0);
-    // sparkle rain
-    if (gameState === 'win' && Math.random() < 0.5) {
-      spawnParticles(Math.random()*W, Math.random()*-20, '#ffd700', 1, 1);
-    }
     return;
   }
 
   // --- Playing ---
-  timer -= dt;
-  if (timer <= 0) {
-    timer = 0;
-    // Always win! She's 6 — every run is a celebration 🎉
+  // Move forward
+  distance += BASE_SPEED * dt;
+
+  // Check win
+  if (distance >= TRACK_LENGTH) {
+    distance = TRACK_LENGTH;
     gameState = 'win'; winTime = 0;
     playWinFanfare();
     for (let i=0;i<10;i++) spawnFirework(Math.random()*W, Math.random()*H*0.5);
+    // Check if top 10
+    const minTop10 = leaderboard.length >= 10 ? leaderboard[leaderboard.length-1].score : 0;
+    if (score > minTop10 || leaderboard.length < 10) {
+      showingNameEntry = true;
+      pendingScore = score;
+      nameInput = '';
+      window._nameSubmitted = false;
+    } else {
+      showingNameEntry = false;
+      window._nameSubmitted = false;
+    }
     return;
   }
 
-  // Early win if energy bar is completely full
-  if (energy >= WIN_ENERGY) {
-    gameState = 'win'; winTime = 0;
-    playWinFanfare();
-    for (let i=0;i<10;i++) spawnFirework(Math.random()*W, Math.random()*H*0.5);
-    return;
+  // Horizontal movement
+  moveDir = 0;
+  if (keys['arrowleft'] || keys['a']) moveDir = -1;
+  if (keys['arrowright'] || keys['d']) moveDir = 1;
+  if (touchLeft) moveDir = -1;
+  if (touchRight) moveDir = 1;
+
+  unicorn.x += moveDir * UNICORN_MOVE_SPEED * dt;
+  unicorn.x = Math.max(0.05, Math.min(0.95, unicorn.x));
+
+  // Trail
+  if (Math.random() < 0.5) {
+    unicorn.trail.push({ x: unicorn.x * W, y: H * 0.72, life: 1 });
+    if (unicorn.trail.length > 25) unicorn.trail.shift();
   }
-
-  globalSparkle = Math.min(1, energy / WIN_ENERGY);
-
-  // Movement
-  let dx = 0, dy = 0;
-  if (keys['arrowleft'] || keys['a']) dx = -1;
-  if (keys['arrowright'] || keys['d']) dx = 1;
-  if (keys['arrowup'] || keys['w']) dy = -1;
-  if (keys['arrowdown'] || keys['s']) dy = 1;
-
-  if (mouseTarget && touching) {
-    const mdx = mouseTarget.x - unicorn.x;
-    const mdy = mouseTarget.y - unicorn.y;
-    const dist = Math.sqrt(mdx*mdx + mdy*mdy);
-    if (dist > 10) { dx = mdx/dist; dy = mdy/dist; }
-    else { mouseTarget = null; }
-  }
-
-  const spd = unicorn.powerTimer > 0 ? unicorn.baseSpeed * 2 : unicorn.baseSpeed;
-  if (dx || dy) {
-    const len = Math.sqrt(dx*dx+dy*dy);
-    unicorn.x += (dx/len) * spd * 60 * dt;
-    unicorn.y += (dy/len) * spd * 60 * dt;
-    unicorn.angle = Math.atan2(dy, dx);
-    // trail
-    unicorn.trail.push({ x: unicorn.x, y: unicorn.y, life: 1 });
-    if (unicorn.trail.length > 30) unicorn.trail.shift();
-  }
-
-  // Clamp
-  unicorn.x = Math.max(30, Math.min(W-30, unicorn.x));
-  unicorn.y = Math.max(30, Math.min(H-30, unicorn.y));
-
-  // Power timer
-  if (unicorn.powerTimer > 0) unicorn.powerTimer -= dt;
-
-  // Trail fade
   unicorn.trail.forEach(t => t.life -= 0.03);
   unicorn.trail = unicorn.trail.filter(t => t.life > 0);
 
@@ -406,82 +338,55 @@ function update(dt) {
   unicorn.blinkTimer -= dt;
   if (unicorn.blinkTimer <= 0) unicorn.blinkTimer = 2 + Math.random()*3;
 
-  // Combo timer
-  if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) combo = 0; }
+  // Rainbow collision
+  const ux = unicorn.x; // 0-1
+  const collectRadius = 0.06; // fraction of screen width
+  const collectDistY = 150; // how far ahead/behind in track units to check
 
-  // Swirl collision
-  swirls.forEach(s => {
-    if (s.fadeIn) { s.alpha = Math.min(1, s.alpha + 2*dt); if(s.alpha>=1) s.fadeIn=false; }
-    s.rotation += s.rotSpeed;
-    s.bobPhase += 2*dt;
-    const sdx = unicorn.x - s.x;
-    const sdy = unicorn.y - (s.y + Math.sin(s.bobPhase)*8);
-    const dist = Math.sqrt(sdx*sdx+sdy*sdy);
-    if (dist < s.radius + 25) {
-      s.life = 0;
-      combo++;
-      comboTimer = 1.5;
-      const pts = s.points * (1 + Math.floor(combo/3));
-      score += pts;
-      energy = Math.min(WIN_ENERGY, energy + (s.isGold ? 8 : 3));
+  trackRainbows.forEach((rb, i) => {
+    if (collectedSet.has(i)) return;
+    const dy = rb.y - distance;
+    // Only check if near the unicorn vertically (on screen)
+    if (Math.abs(dy - H*0.25) > collectDistY) return; // unicorn is at ~75% from top visually, map that
+    // Convert track position to screen Y
+    const screenY = H - (rb.y - distance) * (H / (TRACK_LENGTH * 0.015));
+    // Actually, simpler: the visible window is distance to distance + viewRange
+    const viewRange = 600; // track units visible on screen
+    const relY = (rb.y - distance) / viewRange; // 0 = at unicorn level, 1 = top of screen
+    if (relY < -0.1 || relY > 1.1) return;
+
+    const screenRbY = H * (1 - relY * 0.85 - 0.08);
+    const unicornScreenY = H * 0.72;
+    const screenRbX = rb.x * W;
+    const unicornScreenX = unicorn.x * W;
+
+    const dx = screenRbX - unicornScreenX;
+    const dyScreen = screenRbY - unicornScreenY;
+    const dist = Math.sqrt(dx*dx + dyScreen*dyScreen);
+    const hitRadius = rb.type === 'big' ? 45 : rb.type === 'gold' ? 40 : 35;
+
+    if (dist < hitRadius) {
+      collectedSet.add(i);
+      score += rb.points;
       unicorn.sparkle = 1;
-      shakeAmount = s.isGold ? 8 : 4;
-      flashAlpha = s.isGold ? 0.3 : 0.15;
-      playEatSound(Math.min(combo, 10));
-      spawnParticles(s.x, s.y, s.color, s.isGold ? 20 : 10, s.isGold ? 5 : 3);
-      // Orb star on gold
-      if (s.isGold && unicorn.orbStars.length < 8) {
-        unicorn.orbStars.push({ angle: Math.random()*Math.PI*2, dist: 40+Math.random()*15 });
-      }
+      playEatSound(rb.points);
+      const color = rb.type === 'gold' ? '#ffd700' : rb.type === 'big' ? '#ff6b9d' : '#4dc9ff';
+      spawnParticles(screenRbX, screenRbY, color, rb.type === 'gold' ? 20 : 10, rb.type === 'gold' ? 5 : 3);
     }
   });
-  swirls = swirls.filter(s => s.life > 0);
-
-  // Powerup collision
-  powerups.forEach(p => {
-    if (p.fadeIn) { p.alpha = Math.min(1, p.alpha + 2*dt); if(p.alpha>=1) p.fadeIn=false; }
-    p.bobPhase += 2*dt;
-    const pdx = unicorn.x - p.x;
-    const pdy = unicorn.y - (p.y + Math.sin(p.bobPhase)*6);
-    const dist = Math.sqrt(pdx*pdx+pdy*pdy);
-    if (dist < p.radius + 25) {
-      p.life = 0;
-      playPowerUp();
-      spawnParticles(p.x, p.y, '#ffd700', 15, 4);
-      if (p.type === 'star') unicorn.powerTimer = 5;
-      else if (p.type === 'heart') { unicorn.sparkle = 1; energy = Math.min(WIN_ENERGY, energy+10); }
-      else if (p.type === 'cloud') { unicorn.y -= 60; spawnParticles(unicorn.x, unicorn.y, '#fff', 12, 3); }
-    }
-  });
-  powerups = powerups.filter(p => p.life > 0);
-
-  // Spawn
-  if (swirls.length < 6 + globalSparkle*6 && Math.random() < 0.03) spawnSwirl();
-  if (powerups.length < 2 && Math.random() < 0.003) spawnPowerup();
 
   // Particles
   particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.03; p.life -= p.decay; });
   particles = particles.filter(p => p.life > 0);
 
-  // Ambient sparkles based on progress
-  if (Math.random() < globalSparkle * 0.3) {
-    spawnParticles(Math.random()*W, Math.random()*H, 
-      ['#ffd700','#ff6b9d','#4dc9ff','#c44dff'][Math.floor(Math.random()*4)], 1, 1);
-  }
-
-  // Shake decay
-  shakeAmount *= 0.9;
-  flashAlpha *= 0.92;
+  // Sparkle decay
   unicorn.sparkle *= 0.95;
 
-  // Clouds drift
-  clouds.forEach(c => { c.x += c.speed; if(c.x > W+200) c.x = -c.w; });
-
-  // BG stars twinkle
-  bgStars.forEach(s => { s.twinkle += s.speed; });
-
-  // Orb stars rotate
-  unicorn.orbStars.forEach(s => { s.angle += 0.03; });
+  // Clouds scroll
+  bgClouds.forEach(c => {
+    c.y += BASE_SPEED * dt * 0.3;
+    if (c.y > H + 100) { c.y = -100; c.x = Math.random(); }
+  });
 }
 
 // --- Draw Helpers ---
@@ -493,177 +398,123 @@ function drawStar(cx, cy, r, points=5, color='#ffd700') {
     if(i===0) ctx.moveTo(cx+Math.cos(a)*rad, cy+Math.sin(a)*rad);
     else ctx.lineTo(cx+Math.cos(a)*rad, cy+Math.sin(a)*rad);
   }
-  ctx.closePath();
-  ctx.fillStyle = color;
-  ctx.fill();
-}
-
-function drawHeart(cx, cy, size, color='#ff4d8b') {
-  ctx.save(); ctx.translate(cx, cy); ctx.scale(size/15, size/15);
-  ctx.beginPath();
-  ctx.moveTo(0, -3);
-  ctx.bezierCurveTo(-8,-15,-18,-5,0,10);
-  ctx.moveTo(0, -3);
-  ctx.bezierCurveTo(8,-15,18,-5,0,10);
-  ctx.fillStyle = color; ctx.fill();
-  ctx.restore();
+  ctx.closePath(); ctx.fillStyle = color; ctx.fill();
 }
 
 function drawCloud(cx, cy, w, alpha) {
   ctx.globalAlpha = alpha;
   ctx.fillStyle = '#fff';
   const h = w*0.4;
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, w*0.5, h*0.4, 0, 0, Math.PI*2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(cx-w*0.2, cy-h*0.15, w*0.3, h*0.35, 0, 0, Math.PI*2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(cx+w*0.15, cy-h*0.2, w*0.25, h*0.3, 0, 0, Math.PI*2);
-  ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx, cy, w*0.5, h*0.4, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx-w*0.2, cy-h*0.15, w*0.3, h*0.35, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx+w*0.15, cy-h*0.2, w*0.25, h*0.3, 0, 0, Math.PI*2); ctx.fill();
   ctx.globalAlpha = 1;
 }
 
 // --- Draw Unicorn ---
-function drawUnicorn(x, y, facing, sparkle) {
+function drawUnicorn(x, y, sparkle) {
   ctx.save();
   ctx.translate(x, y);
-  const flip = facing < -Math.PI/2 || facing > Math.PI/2 ? -1 : 1;
-  ctx.scale(flip, 1);
-
   const sc = 1 + sparkle*0.1;
   ctx.scale(sc, sc);
+  // Face upward (toward top of screen)
 
   // Glow
-  if (sparkle > 0.1 || unicorn.powerTimer > 0) {
+  if (sparkle > 0.1) {
     const grad = ctx.createRadialGradient(0, 0, 10, 0, 0, 50);
-    const glowColor = unicorn.powerTimer > 0 ? 'rgba(255,215,0,' : 'rgba(255,107,157,';
-    grad.addColorStop(0, glowColor + (sparkle*0.4+0.1) + ')');
-    grad.addColorStop(1, glowColor + '0)');
+    grad.addColorStop(0, `rgba(255,107,157,${sparkle*0.4})`);
+    grad.addColorStop(1, 'rgba(255,107,157,0)');
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(0, 0, 50, 0, Math.PI*2); ctx.fill();
   }
 
   // Body
-  ctx.fillStyle = '#fff';
-  ctx.strokeStyle = '#e8d5f0';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.ellipse(0, 5, 22, 18, 0, 0, Math.PI*2);
-  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#e8d5f0'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(0, 8, 20, 16, 0, 0, Math.PI*2); ctx.fill(); ctx.stroke();
 
-  // Head
+  // Head (above body, facing up)
   ctx.fillStyle = '#fff';
-  ctx.beginPath();
-  ctx.ellipse(18, -8, 15, 13, 0.2, 0, Math.PI*2);
-  ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(0, -12, 14, 12, 0, 0, Math.PI*2); ctx.fill(); ctx.stroke();
 
-  // Horn
+  // Horn (pointing up)
   ctx.fillStyle = '#ffd700';
-  ctx.beginPath();
-  ctx.moveTo(28, -22);
-  ctx.lineTo(24, -8);
-  ctx.lineTo(32, -10);
-  ctx.closePath();
-  ctx.fill();
-  // Horn spiral
-  ctx.strokeStyle = '#ffec80';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(26, -18); ctx.lineTo(29, -15);
-  ctx.moveTo(25, -14); ctx.lineTo(28, -12);
-  ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, -32); ctx.lineTo(-5, -18); ctx.lineTo(5, -18); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = '#ffec80'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(-2, -28); ctx.lineTo(2, -25); ctx.moveTo(-1, -23); ctx.lineTo(3, -21); ctx.stroke();
 
-  // Ear
+  // Ears
   ctx.fillStyle = '#ffe0f0';
-  ctx.beginPath();
-  ctx.moveTo(22, -18);
-  ctx.lineTo(18, -26);
-  ctx.lineTo(26, -19);
-  ctx.closePath();
-  ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-8, -18); ctx.lineTo(-12, -28); ctx.lineTo(-4, -19); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(8, -18); ctx.lineTo(12, -28); ctx.lineTo(4, -19); ctx.closePath(); ctx.fill();
 
-  // Eye
+  // Eyes
   const blinking = unicorn.blinkTimer < 0.15;
-  ctx.fillStyle = '#2d1b4e';
   if (blinking) {
-    ctx.beginPath();
-    ctx.moveTo(22, -10); ctx.lineTo(28, -10);
-    ctx.strokeStyle = '#2d1b4e'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = '#2d1b4e'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-7, -13); ctx.lineTo(-3, -13); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(3, -13); ctx.lineTo(7, -13); ctx.stroke();
   } else {
-    ctx.beginPath();
-    ctx.arc(25, -10, 4, 0, Math.PI*2);
-    ctx.fill();
-    // Eye shine
+    ctx.fillStyle = '#2d1b4e';
+    ctx.beginPath(); ctx.arc(-5, -13, 3, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(5, -13, 3, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.arc(26.5, -11.5, 1.5, 0, Math.PI*2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(-4, -14, 1.2, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(6, -14, 1.2, 0, Math.PI*2); ctx.fill();
   }
 
   // Blush
   ctx.fillStyle = 'rgba(255,150,180,0.4)';
-  ctx.beginPath(); ctx.ellipse(28, -4, 5, 3, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-9, -8, 4, 2.5, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(9, -8, 4, 2.5, 0, 0, Math.PI*2); ctx.fill();
 
   // Smile
-  ctx.strokeStyle = '#c77dba';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.arc(26, -5, 4, 0.2, Math.PI-0.2);
-  ctx.stroke();
+  ctx.strokeStyle = '#c77dba'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(0, -7, 5, 0.3, Math.PI-0.3); ctx.stroke();
 
-  // Mane (rainbow!)
+  // Mane (rainbow, flowing to the sides)
   const maneColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
   maneColors.forEach((c, i) => {
-    ctx.fillStyle = c;
-    ctx.globalAlpha = 0.8;
-    const mx = 10 - i*3;
-    const my = -15 + i*2 + Math.sin(Date.now()/200 + i)*2;
-    ctx.beginPath();
-    ctx.ellipse(mx, my, 6, 4, -0.5+i*0.2, 0, Math.PI*2);
-    ctx.fill();
+    ctx.fillStyle = c; ctx.globalAlpha = 0.8;
+    const mx = -12 + i*1.5 + Math.sin(Date.now()/200 + i)*2;
+    const my = -5 + i*3;
+    ctx.beginPath(); ctx.ellipse(mx, my, 5, 3.5, -0.3+i*0.15, 0, Math.PI*2); ctx.fill();
+    // Mirror right side
+    const mx2 = 12 - i*1.5 + Math.sin(Date.now()/200 + i + 3)*2;
+    ctx.beginPath(); ctx.ellipse(mx2, my, 5, 3.5, 0.3-i*0.15, 0, Math.PI*2); ctx.fill();
   });
   ctx.globalAlpha = 1;
 
-  // Tail (rainbow!)
+  // Tail (below, flowing down — rainbow)
   maneColors.forEach((c, i) => {
-    ctx.strokeStyle = c;
-    ctx.lineWidth = 3;
-    ctx.globalAlpha = 0.7;
+    ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.globalAlpha = 0.7;
     ctx.beginPath();
-    const tx = -22 - i*2;
-    const ty = 5 + Math.sin(Date.now()/300 + i)*4;
-    ctx.moveTo(-18, 8);
-    ctx.quadraticCurveTo(tx-5, ty-10+Math.sin(Date.now()/250+i)*5, tx-8, ty+5);
+    ctx.moveTo(Math.sin(i)*3, 22);
+    ctx.quadraticCurveTo(
+      Math.sin(Date.now()/250+i)*8, 28+i*3,
+      Math.sin(Date.now()/300+i*0.7)*10, 35+i*4
+    );
     ctx.stroke();
   });
   ctx.globalAlpha = 1;
 
-  // Legs
-  ctx.strokeStyle = '#e8d5f0';
-  ctx.lineWidth = 4;
-  ctx.lineCap = 'round';
-  const legBob = Math.sin(Date.now()/150)*3;
-  [[-10,18,legBob],[5,18,-legBob],[-5,18,-legBob],[10,18,legBob]].forEach(([lx,ly,bob]) => {
-    ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx+bob, ly+12); ctx.stroke();
-    // Hooves
+  // Legs (running animation)
+  ctx.strokeStyle = '#e8d5f0'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  const legBob = Math.sin(Date.now()/120)*4;
+  [[-9,20,legBob],[9,20,-legBob],[-5,20,-legBob],[5,20,legBob]].forEach(([lx,ly,bob]) => {
+    ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx+bob*0.3, ly+10); ctx.stroke();
     ctx.fillStyle = '#ddc0f0';
-    ctx.beginPath(); ctx.arc(lx+bob, ly+13, 3, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(lx+bob*0.3, ly+11, 3, 0, Math.PI*2); ctx.fill();
   });
 
   ctx.restore();
 }
 
 // --- Draw Rainbow Collectible ---
-function drawSwirl(s) {
-  const by = Math.sin(s.bobPhase)*8;
+function drawRainbow(x, y, type) {
   ctx.save();
-  ctx.translate(s.x, s.y + by);
-  ctx.rotate(s.rotation * 0.3); // gentle tilt
-  ctx.globalAlpha = s.alpha;
+  ctx.translate(x, y);
 
-  const r = s.radius;
+  const r = type === 'big' ? 28 : type === 'gold' ? 24 : 18;
 
   // Glow
   const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, r*2);
@@ -672,160 +523,164 @@ function drawSwirl(s) {
   ctx.fillStyle = grad;
   ctx.beginPath(); ctx.arc(0, -r*0.2, r*2, 0, Math.PI*2); ctx.fill();
 
-  if (s.isGold) {
-    // Gold rainbow — shimmering gold arc
+  if (type === 'gold') {
     const goldColors = ['#fff8dc','#ffd700','#ffb800','#ff9500','#ffd700','#fff8dc'];
     ctx.lineCap = 'round';
     goldColors.forEach((c, i) => {
-      const arcR = r - i*2.5;
-      if (arcR <= 0) return;
-      ctx.strokeStyle = c;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(0, r*0.3, arcR, Math.PI, 0);
-      ctx.stroke();
+      const arcR = r - i*2.5; if (arcR <= 0) return;
+      ctx.strokeStyle = c; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(0, r*0.3, arcR, Math.PI, 0); ctx.stroke();
     });
-    // Sparkles on gold rainbow
+    // Sparkles
     for (let i = 0; i < 5; i++) {
       const a = Math.PI + (i/4)*Math.PI;
       const sr = r - 6;
-      const sx = Math.cos(a)*sr;
-      const sy = r*0.3 + Math.sin(a)*sr;
-      ctx.globalAlpha = s.alpha * (0.4 + Math.sin(Date.now()/200+i*1.5)*0.4);
-      drawStar(sx, sy, 4, 4, '#fff');
+      ctx.globalAlpha = 0.4 + Math.sin(Date.now()/200+i*1.5)*0.4;
+      drawStar(Math.cos(a)*sr, r*0.3+Math.sin(a)*sr, 4, 4, '#fff');
     }
-    ctx.globalAlpha = s.alpha;
+    ctx.globalAlpha = 1;
+    // Points label
+    ctx.fillStyle = '#ffd700'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('100', 0, r*0.3 + r + 12);
   } else {
-    // Rainbow arc — the classic 🌈
     const rainbowColors = ['#ff0000','#ff8800','#ffdd00','#00cc44','#0088ff','#8844ff','#cc44cc'];
     ctx.lineCap = 'round';
+    const lineW = type === 'big' ? 3 : 2;
     rainbowColors.forEach((c, i) => {
-      const arcR = r - i*2.2;
-      if (arcR <= 2) return;
-      ctx.strokeStyle = c;
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.arc(0, r*0.3, arcR, Math.PI, 0);
-      ctx.stroke();
+      const arcR = r - i*(type==='big'?2.8:2); if (arcR <= 2) return;
+      ctx.strokeStyle = c; ctx.lineWidth = lineW;
+      ctx.beginPath(); ctx.arc(0, r*0.3, arcR, Math.PI, 0); ctx.stroke();
     });
-
-    // Tiny clouds at rainbow feet
-    ctx.fillStyle = '#fff';
-    ctx.globalAlpha = s.alpha * 0.7;
-    ctx.beginPath(); ctx.ellipse(-r+2, r*0.3, 6, 4, 0, 0, Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(r-2, r*0.3, 6, 4, 0, 0, Math.PI*2); ctx.fill();
-    ctx.globalAlpha = s.alpha;
+    // Clouds at feet
+    ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.7;
+    ctx.beginPath(); ctx.ellipse(-r+2, r*0.3, 5, 3, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(r-2, r*0.3, 5, 3, 0, 0, Math.PI*2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // Points label
+    ctx.fillStyle = type === 'big' ? '#ff6b9d' : '#4dc9ff';
+    ctx.font = `bold ${type==='big'?12:10}px sans-serif`; ctx.textAlign = 'center';
+    ctx.fillText(type === 'big' ? '50' : '10', 0, r*0.3 + r + 10);
   }
 
-  // Shimmer particles around rainbow
-  const shimmer = Math.sin(Date.now()/300 + s.bobPhase);
-  if (shimmer > 0.5) {
-    ctx.globalAlpha = s.alpha * (shimmer - 0.5)*1.5;
-    drawStar(r*0.6, -r*0.4, 3, 4, '#ffd700');
-    drawStar(-r*0.5, -r*0.3, 2, 4, '#ff6b9d');
-  }
-
-  ctx.globalAlpha = 1;
   ctx.restore();
 }
 
-// --- Draw Powerup ---
-function drawPowerup(p) {
-  const by = Math.sin(p.bobPhase)*6;
+// --- Draw Big Finish Rainbow ---
+function drawFinishRainbow(y) {
   ctx.save();
-  ctx.translate(p.x, p.y + by);
-  ctx.globalAlpha = p.alpha;
-
-  // Glow
-  const grad = ctx.createRadialGradient(0, 0, 5, 0, 0, 30);
-  grad.addColorStop(0, 'rgba(255,255,255,0.4)');
-  grad.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = grad;
-  ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI*2); ctx.fill();
-
-  if (p.type === 'star') {
-    drawStar(0, 0, 15, 5, '#ffd700');
-    drawStar(0, 0, 8, 5, '#fff');
-  } else if (p.type === 'heart') {
-    drawHeart(0, -2, 20, '#ff4d8b');
-  } else if (p.type === 'cloud') {
-    drawCloud(0, 0, 35, 0.9);
-    ctx.fillStyle = '#4dc9ff';
-    ctx.font = 'bold 14px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('↑', 0, 5);
+  ctx.translate(W/2, y);
+  const r = W * 0.4;
+  const rainbowColors = ['#ff0000','#ff8800','#ffdd00','#00cc44','#0088ff','#8844ff','#cc44cc'];
+  ctx.lineCap = 'round';
+  rainbowColors.forEach((c, i) => {
+    const arcR = r - i*8; if (arcR <= 0) return;
+    ctx.strokeStyle = c; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.arc(0, 0, arcR, Math.PI, 0); ctx.stroke();
+  });
+  // Sparkles
+  for (let i = 0; i < 12; i++) {
+    const a = Math.PI + (i/11)*Math.PI;
+    ctx.globalAlpha = 0.5 + Math.sin(Date.now()/200+i)*0.4;
+    drawStar(Math.cos(a)*(r+15), Math.sin(a)*(r+15), 6, 5, '#ffd700');
   }
-
   ctx.globalAlpha = 1;
+  // Label
+  ctx.fillStyle = '#ffd700'; ctx.font = `bold ${Math.min(24,W*0.05)}px sans-serif`; ctx.textAlign = 'center';
+  ctx.fillText('🌈 FINISH! 🌈', 0, -r - 15);
   ctx.restore();
 }
 
 // --- Draw Background ---
-function drawBackground() {
-  // Sky gradient that gets more colorful with progress
+function drawPlayBackground() {
+  // Sky gradient
+  const progress = distance / TRACK_LENGTH;
   const grad = ctx.createLinearGradient(0, 0, 0, H);
-  const mag = globalSparkle;
-  const r1 = Math.floor(30 + mag*40);
-  const g1 = Math.floor(10 + mag*20);
-  const b1 = Math.floor(60 + mag*50);
-  const r2 = Math.floor(60 + mag*80);
-  const g2 = Math.floor(20 + mag*40);
-  const b2 = Math.floor(100 + mag*60);
+  // Sky gets brighter as you progress
+  const r1 = Math.floor(20 + progress*50);
+  const g1 = Math.floor(8 + progress*30);
+  const b1 = Math.floor(50 + progress*60);
+  const r2 = Math.floor(40 + progress*80);
+  const g2 = Math.floor(15 + progress*50);
+  const b2 = Math.floor(80 + progress*70);
   grad.addColorStop(0, `rgb(${r1},${g1},${b1})`);
   grad.addColorStop(1, `rgb(${r2},${g2},${b2})`);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
-  // Stars
-  bgStars.forEach(s => {
-    const alpha = 0.3 + Math.sin(s.twinkle)*0.3 + mag*0.3;
+  // Scrolling stars
+  const viewRange = 600;
+  trackStars.forEach(s => {
+    const relY = (s.y - distance) / viewRange;
+    if (relY < -0.1 || relY > 1.2) return;
+    const sy = H * (1 - relY * 0.85 - 0.08);
+    const sx = s.x * W;
+    const alpha = 0.3 + Math.sin(Date.now()*0.003 + s.twinkleOffset)*0.3;
     ctx.globalAlpha = alpha;
     ctx.fillStyle = '#fff';
-    if (s.size > 2) {
-      drawStar(s.x % W, s.y % H, s.size, 4, '#fff');
-    } else {
-      ctx.beginPath();
-      ctx.arc(s.x % W, s.y % H, s.size, 0, Math.PI*2);
-      ctx.fill();
-    }
+    if (s.size > 1.5) drawStar(sx, sy, s.size, 4, '#fff');
+    else { ctx.beginPath(); ctx.arc(sx, sy, s.size, 0, Math.PI*2); ctx.fill(); }
   });
   ctx.globalAlpha = 1;
 
   // Clouds
-  clouds.forEach(c => drawCloud(c.x, c.y, c.w, c.alpha + mag*0.1));
+  bgClouds.forEach(c => drawCloud(c.x * W, c.y, c.w, c.alpha));
 
-  // Ground (soft gradient)
-  const gGrad = ctx.createLinearGradient(0, H*0.85, 0, H);
-  gGrad.addColorStop(0, 'rgba(100,50,150,0)');
-  gGrad.addColorStop(1, `rgba(${80+mag*50},${40+mag*30},${120+mag*40},0.3)`);
-  ctx.fillStyle = gGrad;
-  ctx.fillRect(0, H*0.85, W, H*0.15);
+  // Rainbow road lane (subtle center lane)
+  const laneW = W * 0.6;
+  const laneX = (W - laneW) / 2;
+  const laneGrad = ctx.createLinearGradient(laneX, 0, laneX + laneW, 0);
+  laneGrad.addColorStop(0, 'rgba(255,107,157,0)');
+  laneGrad.addColorStop(0.1, 'rgba(255,107,157,0.04)');
+  laneGrad.addColorStop(0.3, 'rgba(255,158,77,0.04)');
+  laneGrad.addColorStop(0.5, 'rgba(255,215,0,0.05)');
+  laneGrad.addColorStop(0.7, 'rgba(77,255,136,0.04)');
+  laneGrad.addColorStop(0.9, 'rgba(77,201,255,0.04)');
+  laneGrad.addColorStop(1, 'rgba(196,77,255,0)');
+  ctx.fillStyle = laneGrad;
+  ctx.fillRect(laneX, 0, laneW, H);
+
+  // Lane edge lines (subtle)
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([10, 20]);
+  ctx.beginPath(); ctx.moveTo(laneX, 0); ctx.lineTo(laneX, H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(laneX+laneW, 0); ctx.lineTo(laneX+laneW, H); ctx.stroke();
+  ctx.setLineDash([]);
 }
 
 // --- Draw HUD ---
 function drawHUD() {
-  // Rainbow Energy bar
-  const barW = Math.min(300, W*0.6);
-  const barH = 25;
-  const barX = (W - barW)/2;
-  const barY = 15;
+  const progress = distance / TRACK_LENGTH;
+
+  // Score (top left)
+  ctx.fillStyle = '#ffd700';
+  ctx.font = `bold ${Math.min(22, W*0.04)}px sans-serif`;
+  ctx.textAlign = 'left';
+  ctx.fillText(`✨ ${score}`, 15, 32);
+
+  // Progress bar (right side, vertical)
+  const barH = H * 0.6;
+  const barW = 18;
+  const barX = W - 35;
+  const barY = (H - barH) / 2;
 
   // Label
+  ctx.save();
   ctx.fillStyle = '#fff';
-  ctx.font = 'bold 14px sans-serif';
+  ctx.font = `bold ${Math.min(11, W*0.022)}px sans-serif`;
   ctx.textAlign = 'center';
-  ctx.fillText('🌈 Rainbow Energy 🌈', W/2, barY - 2);
+  ctx.translate(barX + barW/2, barY - 15);
+  ctx.fillText('🌈', 0, 0);
+  ctx.restore();
 
-  // Bar bg
+  // Bar background
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.roundRect(barX, barY+2, barW, barH, barH/2);
-  ctx.fill();
+  ctx.beginPath(); ctx.roundRect(barX, barY, barW, barH, barW/2); ctx.fill();
 
-  // Bar fill (rainbow gradient)
-  const fill = energy / WIN_ENERGY;
-  if (fill > 0) {
-    const fGrad = ctx.createLinearGradient(barX, 0, barX + barW*fill, 0);
+  // Bar fill (from bottom up, rainbow gradient)
+  if (progress > 0) {
+    const fillH = barH * progress;
+    const fGrad = ctx.createLinearGradient(0, barY+barH, 0, barY+barH-fillH);
     fGrad.addColorStop(0, '#ff6b9d');
     fGrad.addColorStop(0.2, '#ff9e4d');
     fGrad.addColorStop(0.4, '#ffd700');
@@ -834,311 +689,260 @@ function drawHUD() {
     fGrad.addColorStop(1, '#c44dff');
     ctx.fillStyle = fGrad;
     ctx.beginPath();
-    ctx.roundRect(barX+2, barY+4, (barW-4)*fill, barH-4, (barH-4)/2);
+    ctx.roundRect(barX+2, barY+barH-fillH, barW-4, fillH, (barW-4)/2);
     ctx.fill();
   }
 
-  // Timer as rainbow bridge
-  const bridgeY = barY + barH + 12;
-  const timeLeft = timer / GAME_DURATION;
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 12px sans-serif';
+  // Unicorn indicator on progress bar
+  const indicatorY = barY + barH - barH * progress;
+  ctx.font = '14px sans-serif';
   ctx.textAlign = 'center';
-  const mins = Math.floor(timer/60);
-  const secs = Math.floor(timer%60);
-  ctx.fillText(`🌉 Rainbow Bridge: ${mins}:${secs.toString().padStart(2,'0')} 🌉`, W/2, bridgeY);
+  ctx.fillText('🦄', barX + barW/2 - 16, indicatorY + 5);
 
-  // Bridge visual
-  const bW = Math.min(250, W*0.5);
-  const bX = (W-bW)/2;
-  const bY = bridgeY + 5;
-  ctx.fillStyle = 'rgba(0,0,0,0.2)';
-  ctx.beginPath(); ctx.roundRect(bX, bY, bW, 8, 4); ctx.fill();
-  const bColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
-  const bFill = 1 - timeLeft;
-  bColors.forEach((c, i) => {
-    const segW = (bW-4) * bFill / bColors.length;
-    ctx.fillStyle = c;
-    ctx.fillRect(bX+2 + i*segW, bY+1, segW+1, 6);
-  });
+  // Finish rainbow at top of bar
+  ctx.fillText('🌈', barX + barW/2, barY + barH + 18);
 
-  // Score
-  ctx.fillStyle = '#ffd700';
-  ctx.font = 'bold 18px sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText(`✨ ${score}`, 15, 30);
+  // Percentage
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.min(12, W*0.024)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText(`${Math.floor(progress*100)}%`, barX + barW/2, barY + barH + 32);
 
-  // Combo
-  if (combo > 1) {
-    ctx.fillStyle = '#ff6b9d';
-    const comboSize = Math.min(18+combo*2, 36); // cap font size
-    ctx.font = `bold ${comboSize}px sans-serif`;
-    ctx.textAlign = 'right';
-    ctx.fillText(`${combo}x COMBO! 🔥`, W-15, 75);
+  // Touch indicators (subtle)
+  if (gameState === 'playing') {
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = '#fff';
+    ctx.font = `${Math.min(30, W*0.06)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('◀', W*0.12, H*0.5);
+    ctx.fillText('▶', W*0.88, H*0.5);
+    ctx.globalAlpha = 1;
   }
 }
 
 // --- Draw Title ---
 function drawTitle() {
-  drawBackground();
+  // Background
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#1a0a2e'); grad.addColorStop(1, '#2d1050');
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
 
   const t = titleTime;
-  ctx.save();
   ctx.textAlign = 'center';
 
-  // Big unicorn emoji
-  ctx.font = `${50 + Math.sin(t*2)*4}px sans-serif`;
-  ctx.fillText('🦄', W/2, H*0.13);
+  // Unicorn emoji
+  ctx.font = `${50+Math.sin(t*2)*4}px sans-serif`;
+  ctx.fillText('🦄', W/2, H*0.11);
 
-  // Title with rainbow letters
+  // Title rainbow letters
   const title = 'Eating Unicorn Rainbows';
-  const titleSize = Math.min(34, W*0.06);
+  const titleSize = Math.min(32, W*0.055);
   ctx.font = `bold ${titleSize}px sans-serif`;
   const colors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
   const metrics = ctx.measureText(title);
   const startX = W/2 - metrics.width/2;
   for (let i = 0; i < title.length; i++) {
-    ctx.fillStyle = colors[Math.floor((i + t*3) % colors.length)];
+    ctx.fillStyle = colors[Math.floor((i+t*3)%colors.length)];
     const charW = ctx.measureText(title[i]).width;
-    const yOff = Math.sin(t*3 + i*0.3) * 4;
-    ctx.fillText(title[i], startX + ctx.measureText(title.substring(0,i)).width + charW/2, H*0.22 + yOff);
+    const yOff = Math.sin(t*3+i*0.3)*4;
+    ctx.fillText(title[i], startX+ctx.measureText(title.substring(0,i)).width+charW/2, H*0.20+yOff);
   }
 
-  // Sparkles around title
-  for (let i = 0; i < 8; i++) {
-    const a = t*0.5 + i*(Math.PI*2/8);
-    const r = 120 + Math.sin(t*2+i)*15;
-    const sx = W/2 + Math.cos(a)*r;
-    const sy = H*0.19 + Math.sin(a)*r*0.2;
-    ctx.globalAlpha = 0.4 + Math.sin(t*4+i)*0.3;
-    drawStar(sx, sy, 3+Math.sin(t*3+i)*2, 4, colors[i%colors.length]);
-  }
-  ctx.globalAlpha = 1;
+  // Subtitle
+  ctx.fillStyle = '#c9a0ff';
+  ctx.font = `${Math.min(16, W*0.03)}px sans-serif`;
+  ctx.fillText('🏁 Vertical Rainbow Race! 🏁', W/2, H*0.26);
 
-  // --- HOW TO PLAY instructions (animated, one at a time fading in) ---
+  // Instructions
   const instructions = [
-    { icon: '🦄', text: 'Tap where you want to go!', color: '#ff6b9d' },
-    { icon: '🌈', text: 'Eat rainbows for energy!', color: '#4dc9ff' },
-    { icon: '⭐', text: 'Fill the bar to SUPER WIN!', color: '#ffd700' },
-    { icon: '✨', text: 'Golden rainbows = bonus!', color: '#ffec80' },
-    { icon: '💖', text: 'Power-ups help you!', color: '#ff4d8b' },
+    { icon: '🦄', text: 'Race upward to the Big Rainbow!', color: '#ff6b9d' },
+    { icon: '⬅➡', text: 'Tap left/right to move!', color: '#4dc9ff' },
+    { icon: '🌈', text: 'Collect rainbows for points!', color: '#ffd700' },
+    { icon: '✨', text: 'Gold = 100, Big = 50, Small = 10', color: '#ffec80' },
+    { icon: '🏆', text: 'Same track for everyone — compete!', color: '#4dff88' },
   ];
 
-  const instrSize = Math.min(18, W*0.035);
-  const iconSize = Math.min(26, W*0.045);
-  const instrStartY = H*0.30;
-  const instrSpacing = Math.min(38, H*0.055);
+  const instrSize = Math.min(16, W*0.032);
+  const instrStartY = H*0.32;
+  const instrSpacing = Math.min(34, H*0.05);
 
   instructions.forEach((inst, i) => {
-    // Each instruction fades in sequentially, then stays
-    const fadeStart = 0.5 + i * 0.6; // stagger
-    const alpha = Math.min(1, Math.max(0, (t - fadeStart) * 2));
-    // Gentle bob
-    const bob = Math.sin(t*2 + i*0.8) * 3;
-    const iy = instrStartY + i * instrSpacing + bob;
-
+    const fadeStart = 0.5 + i*0.5;
+    const alpha = Math.min(1, Math.max(0, (t-fadeStart)*2));
+    const bob = Math.sin(t*2+i*0.8)*3;
     ctx.globalAlpha = alpha;
-    ctx.font = `${iconSize}px sans-serif`;
-    ctx.fillText(inst.icon, W/2 - Math.min(140, W*0.28), iy);
+    ctx.font = `${Math.min(22,W*0.04)}px sans-serif`;
+    ctx.fillText(inst.icon, W/2 - Math.min(150,W*0.3), instrStartY+i*instrSpacing+bob);
     ctx.font = `bold ${instrSize}px sans-serif`;
     ctx.fillStyle = inst.color;
-    ctx.fillText(inst.text, W/2 + 10, iy);
+    ctx.fillText(inst.text, W/2+10, instrStartY+i*instrSpacing+bob);
   });
   ctx.globalAlpha = 1;
 
-  // --- LEADERBOARD ---
-  const lbY = instrStartY + instructions.length * instrSpacing + 15;
-  const scores = leaderboard.length > 0 ? leaderboard : personalBests;
-  if (scores.length > 0) {
+  // Leaderboard
+  const lbY = instrStartY + instructions.length*instrSpacing + 20;
+  if (leaderboard.length > 0) {
     ctx.fillStyle = '#ffd700';
-    ctx.font = `bold ${Math.min(18, W*0.035)}px sans-serif`;
-    ctx.fillText('🏆 Top Scores 🏆', W/2, lbY);
-    const lbSize = Math.min(14, W*0.028);
+    ctx.font = `bold ${Math.min(18,W*0.035)}px sans-serif`;
+    ctx.fillText('🏆 Top 10 Scores 🏆', W/2, lbY);
+    const lbSize = Math.min(13, W*0.026);
     ctx.font = `${lbSize}px sans-serif`;
-    scores.slice(0, 5).forEach((s, i) => {
-      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '⭐';
-      ctx.fillStyle = i < 3 ? '#ffd700' : '#ccc';
-      ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, lbY + 20 + i * (lbSize + 6));
+    leaderboard.slice(0,10).forEach((s,i) => {
+      const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'⭐';
+      ctx.fillStyle = i<3?'#ffd700':'#ccc';
+      ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, lbY+18+i*(lbSize+5));
     });
   }
 
-  // --- TAP TO PLAY (always prominent at bottom) ---
-  const pulse = 0.7 + Math.sin(t*3)*0.3;
+  // Tap to play
+  const pulse = 0.7+Math.sin(t*3)*0.3;
   ctx.globalAlpha = pulse;
   ctx.fillStyle = '#ffd700';
-  ctx.font = `bold ${Math.min(30, W*0.055)}px sans-serif`;
-  ctx.fillText('🌟 Tap to Play! 🌟', W/2, H*0.90);
+  ctx.font = `bold ${Math.min(28,W*0.05)}px sans-serif`;
+  ctx.fillText('🌟 Tap to Race! 🌟', W/2, H*0.92);
   ctx.globalAlpha = 1;
-
-  ctx.restore();
 }
 
-// --- Draw Win/Lose ---
-function drawEndScreen() {
-  drawBackground();
+// --- Draw Win Screen ---
+function drawWinScreen() {
+  // Background
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#1a0a2e'); grad.addColorStop(1, '#2d1050');
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
 
   // Fireworks
   fireworks.forEach(f => {
-    ctx.globalAlpha = f.life;
-    ctx.fillStyle = f.color;
-    ctx.beginPath();
-    ctx.arc(f.x, f.y, f.size, 0, Math.PI*2);
-    ctx.fill();
+    ctx.globalAlpha = f.life; ctx.fillStyle = f.color;
+    ctx.beginPath(); ctx.arc(f.x, f.y, f.size, 0, Math.PI*2); ctx.fill();
   });
   ctx.globalAlpha = 1;
 
   // Particles
   particles.forEach(p => {
-    ctx.globalAlpha = p.life;
-    ctx.fillStyle = p.color;
-    if (p.type === 'star') drawStar(p.x, p.y, p.size, 4, p.color);
-    else { ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill(); }
+    ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
+    if (p.type==='star') drawStar(p.x,p.y,p.size,4,p.color);
+    else { ctx.beginPath(); ctx.arc(p.x,p.y,p.size,0,Math.PI*2); ctx.fill(); }
   });
   ctx.globalAlpha = 1;
 
   ctx.textAlign = 'center';
 
-  if (gameState === 'win') {
-    if (showingNameEntry) {
-      // --- NAME ENTRY SCREEN ---
-      ctx.fillStyle = '#ffd700';
-      ctx.font = `bold ${Math.min(30, W*0.055)}px sans-serif`;
-      ctx.fillText('⭐ NEW HIGH SCORE! ⭐', W/2, H*0.12);
-
-      ctx.fillStyle = '#fff';
-      ctx.font = `${Math.min(22, W*0.04)}px sans-serif`;
-      ctx.fillText(`${pendingScore} points!`, W/2, H*0.19);
-
-      ctx.fillStyle = '#ff6b9d';
-      ctx.font = `bold ${Math.min(24, W*0.042)}px sans-serif`;
-      ctx.fillText("What's your name? 🦄", W/2, H*0.27);
-
-      // Name input box
-      const boxW = Math.min(280, W*0.7);
-      const boxH = 55;
-      const boxX = (W-boxW)/2;
-      const boxY = H*0.30;
-      ctx.shadowColor = '#ff6b9d';
-      ctx.shadowBlur = 15;
-      ctx.fillStyle = 'rgba(255,255,255,0.95)';
-      ctx.beginPath(); ctx.roundRect(boxX, boxY, boxW, boxH, 15); ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = nameInput ? '#2d1b4e' : '#bbb';
-      ctx.font = `bold ${Math.min(28, W*0.05)}px sans-serif`;
-      const cursor = Math.sin(winTime*5)>0 ? '|' : '';
-      ctx.fillText(nameInput ? nameInput + cursor : 'Type here...', W/2, boxY + boxH/2 + 10);
-
-      // On-screen keyboard
-      const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-      const btnSize = Math.min(36, Math.floor((W-30)/10));
-      const btnPad = 3;
-      const rowLen = 10;
-      const kbStartY = boxY + boxH + 15;
-      const kbW = rowLen * (btnSize + btnPad);
-      const kbStartX = (W - kbW) / 2;
-      const btnColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
-
-      for (let i = 0; i < letters.length; i++) {
-        const row = Math.floor(i / rowLen);
-        const col = i % rowLen;
-        const bx = kbStartX + col * (btnSize + btnPad);
-        const by = kbStartY + row * (btnSize + btnPad);
-        ctx.fillStyle = btnColors[i % btnColors.length];
-        ctx.beginPath(); ctx.roundRect(bx, by, btnSize, btnSize, 8); ctx.fill();
-        ctx.fillStyle = '#fff';
-        ctx.font = `bold ${Math.floor(btnSize*0.5)}px sans-serif`;
-        ctx.fillText(letters[i], bx + btnSize/2, by + btnSize*0.65);
-      }
-
-      // Delete & Done
-      const ctrlY = kbStartY + 3 * (btnSize + btnPad) + 5;
-      const ctrlBtnW = Math.min(100, W*0.25);
-      ctx.fillStyle = '#ff4d8b';
-      ctx.beginPath(); ctx.roundRect(W/2 - ctrlBtnW - 10, ctrlY, ctrlBtnW, btnSize+4, 10); ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.font = `bold ${Math.floor(btnSize*0.4)}px sans-serif`;
-      ctx.fillText('⬅ Delete', W/2 - ctrlBtnW/2 - 10, ctrlY + btnSize*0.7);
-      ctx.fillStyle = '#4dff88';
-      ctx.beginPath(); ctx.roundRect(W/2 + 10, ctrlY, ctrlBtnW, btnSize+4, 10); ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.fillText('✅ Done!', W/2 + ctrlBtnW/2 + 10, ctrlY + btnSize*0.7);
-
-      // Store layout for click handling
-      window._nameKB = { letters, btnSize, btnPad, rowLen, kbStartX, kbStartY, ctrlY, ctrlBtnW };
-    } else {
-      // --- NORMAL WIN SCREEN ---
-      const bounce = Math.abs(Math.sin(winTime*5))*20;
-      ctx.font = `${60+Math.sin(winTime*3)*8}px sans-serif`;
-      ctx.fillText('🦄', W/2, H*0.22 - bounce);
-      ctx.font = '50px sans-serif';
-      ctx.fillText('🌈', W/2, H*0.10);
-
-      const wColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
-      ctx.font = `bold ${Math.min(42, W*0.07)}px sans-serif`;
-      const msg = 'YOU DID IT!';
-      const mw = ctx.measureText(msg);
-      const msx = W/2 - mw.width/2;
-      for (let i = 0; i < msg.length; i++) {
-        ctx.fillStyle = wColors[Math.floor((i+winTime*5) % wColors.length)];
-        const cw = ctx.measureText(msg[i]).width;
-        const yOff = Math.sin(winTime*4+i*0.4)*8;
-        ctx.fillText(msg[i], msx + ctx.measureText(msg.substring(0,i)).width + cw/2, H*0.38 + yOff);
-      }
-
-      ctx.fillStyle = '#fff';
-      ctx.font = `${Math.min(20, W*0.035)}px sans-serif`;
-      ctx.fillText(`You ate ${score} rainbow points! ✨`, W/2, H*0.46);
-
-      // Show leaderboard
-      const allScores = leaderboard.length > 0 ? leaderboard : personalBests;
-      if (allScores.length > 0) {
-        ctx.fillStyle = '#ffd700';
-        ctx.font = `bold ${Math.min(16, W*0.032)}px sans-serif`;
-        ctx.fillText('🏆 Leaderboard 🏆', W/2, H*0.54);
-        const lbS = Math.min(13, W*0.026);
-        ctx.font = `${lbS}px sans-serif`;
-        allScores.slice(0,5).forEach((s,i) => {
-          const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'⭐';
-          ctx.fillStyle = i<3 ? '#ffd700' : '#ccc';
-          ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, H*0.54 + 18 + i*(lbS+5));
-        });
-      }
-
-      ctx.font = '26px sans-serif';
-      ctx.fillText('🎉 🦄 🌈 ⭐ 💖 🎉', W/2, H*0.80);
-
-      if (winTime > 2) {
-        const pulse = 0.7 + Math.sin(winTime*3)*0.3;
-        ctx.globalAlpha = pulse;
-        ctx.fillStyle = '#ffd700';
-        ctx.font = `bold ${Math.min(22, W*0.04)}px sans-serif`;
-        ctx.fillText('🌟 Tap to Play Again! 🌟', W/2, H*0.90);
-        ctx.globalAlpha = 1;
-      }
-    }
-  } else {
-    // Gentle lose
-    ctx.font = '60px sans-serif';
-    ctx.fillText('🌈', W/2, H*0.25);
-    ctx.font = '50px sans-serif';
-    ctx.fillText('🦄', W/2, H*0.38);
+  if (showingNameEntry) {
+    // Name entry
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `bold ${Math.min(28,W*0.05)}px sans-serif`;
+    ctx.fillText('⭐ TOP 10 SCORE! ⭐', W/2, H*0.10);
 
     ctx.fillStyle = '#fff';
-    ctx.font = `bold ${Math.min(32, W*0.06)}px sans-serif`;
-    ctx.fillText('Almost there!', W/2, H*0.52);
-    ctx.font = `${Math.min(22, W*0.04)}px sans-serif`;
-    ctx.fillText('You are a unicorn superstar! 🌟', W/2, H*0.60);
-    ctx.fillText(`You collected ${Math.floor(energy)}/${WIN_ENERGY} rainbow energy!`, W/2, H*0.67);
-    ctx.fillStyle = '#ffd700';
-    ctx.font = `bold ${Math.min(20, W*0.035)}px sans-serif`;
-    ctx.fillText(`Score: ${score} ✨`, W/2, H*0.74);
+    ctx.font = `${Math.min(22,W*0.04)}px sans-serif`;
+    ctx.fillText(`${pendingScore} points!`, W/2, H*0.17);
+
+    ctx.fillStyle = '#ff6b9d';
+    ctx.font = `bold ${Math.min(22,W*0.04)}px sans-serif`;
+    ctx.fillText("What's your name? 🦄", W/2, H*0.24);
+
+    // Input box
+    const boxW = Math.min(280,W*0.7), boxH = 50;
+    const boxX = (W-boxW)/2, boxY = H*0.27;
+    ctx.shadowColor = '#ff6b9d'; ctx.shadowBlur = 15;
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.beginPath(); ctx.roundRect(boxX, boxY, boxW, boxH, 15); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = nameInput ? '#2d1b4e' : '#bbb';
+    ctx.font = `bold ${Math.min(26,W*0.045)}px sans-serif`;
+    const cursor = Math.sin(winTime*5)>0 ? '|' : '';
+    ctx.fillText(nameInput ? nameInput+cursor : 'Type here...', W/2, boxY+boxH/2+9);
+
+    // Keyboard
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const btnSize = Math.min(34, Math.floor((W-30)/10));
+    const btnPad = 3;
+    const rowLen = 10;
+    const kbStartY = boxY + boxH + 12;
+    const kbW = rowLen*(btnSize+btnPad);
+    const kbStartX = (W-kbW)/2;
+    const btnColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
+
+    for (let i = 0; i < letters.length; i++) {
+      const row = Math.floor(i/rowLen), col = i%rowLen;
+      const bx = kbStartX+col*(btnSize+btnPad), by = kbStartY+row*(btnSize+btnPad);
+      ctx.fillStyle = btnColors[i%btnColors.length];
+      ctx.beginPath(); ctx.roundRect(bx, by, btnSize, btnSize, 8); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${Math.floor(btnSize*0.5)}px sans-serif`;
+      ctx.fillText(letters[i], bx+btnSize/2, by+btnSize*0.65);
+    }
+
+    const ctrlY = kbStartY + 3*(btnSize+btnPad)+5;
+    const ctrlBtnW = Math.min(100, W*0.25);
+    ctx.fillStyle = '#ff4d8b';
+    ctx.beginPath(); ctx.roundRect(W/2-ctrlBtnW-10, ctrlY, ctrlBtnW, btnSize+4, 10); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.floor(btnSize*0.4)}px sans-serif`;
+    ctx.fillText('⬅ Delete', W/2-ctrlBtnW/2-10, ctrlY+btnSize*0.7);
+    ctx.fillStyle = '#4dff88';
+    ctx.beginPath(); ctx.roundRect(W/2+10, ctrlY, ctrlBtnW, btnSize+4, 10); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText('✅ Done!', W/2+ctrlBtnW/2+10, ctrlY+btnSize*0.7);
+
+    window._nameKB = { letters, btnSize, btnPad, rowLen, kbStartX, kbStartY, ctrlY, ctrlBtnW };
+  } else {
+    // Win screen
+    const bounce = Math.abs(Math.sin(winTime*5))*20;
+    ctx.font = `${60+Math.sin(winTime*3)*8}px sans-serif`;
+    ctx.fillText('🦄', W/2, H*0.18-bounce);
+    ctx.font = '50px sans-serif';
+    ctx.fillText('🌈', W/2, H*0.08);
+
+    const wColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
+    ctx.font = `bold ${Math.min(40,W*0.07)}px sans-serif`;
+    const msg = 'YOU DID IT!';
+    const mw = ctx.measureText(msg);
+    const msx = W/2-mw.width/2;
+    for (let i = 0; i < msg.length; i++) {
+      ctx.fillStyle = wColors[Math.floor((i+winTime*5)%wColors.length)];
+      const cw = ctx.measureText(msg[i]).width;
+      const yOff = Math.sin(winTime*4+i*0.4)*8;
+      ctx.fillText(msg[i], msx+ctx.measureText(msg.substring(0,i)).width+cw/2, H*0.33+yOff);
+    }
+
+    ctx.fillStyle = '#fff';
+    ctx.font = `${Math.min(22,W*0.04)}px sans-serif`;
+    ctx.fillText(`You collected ${score} rainbow points! ✨`, W/2, H*0.41);
+
+    // Check if NOT in top 10
+    const minTop10 = leaderboard.length >= 10 ? leaderboard[leaderboard.length-1].score : 0;
+    if (window._nameSubmitted || (score <= minTop10 && leaderboard.length >= 10)) {
+      if (!window._nameSubmitted && score <= minTop10) {
+        ctx.fillStyle = '#c9a0ff';
+        ctx.font = `${Math.min(18,W*0.033)}px sans-serif`;
+        ctx.fillText(`Great run! Top 10 starts at ${minTop10} points — keep trying! 🌟`, W/2, H*0.48);
+      }
+    }
+
+    // Leaderboard
+    const allScores = leaderboard;
+    if (allScores.length > 0) {
+      ctx.fillStyle = '#ffd700';
+      ctx.font = `bold ${Math.min(16,W*0.032)}px sans-serif`;
+      ctx.fillText('🏆 Top 10 🏆', W/2, H*0.54);
+      const lbS = Math.min(13,W*0.026);
+      ctx.font = `${lbS}px sans-serif`;
+      allScores.slice(0,10).forEach((s,i) => {
+        const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'⭐';
+        ctx.fillStyle = i<3?'#ffd700':'#ccc';
+        ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, H*0.54+18+i*(lbS+5));
+      });
+    }
+
+    ctx.font = '26px sans-serif';
+    ctx.fillText('🎉 🦄 🌈 ⭐ 💖 🎉', W/2, H*0.85);
 
     if (winTime > 2) {
-      const pulse = 0.7 + Math.sin(winTime*3)*0.3;
+      const pulse = 0.7+Math.sin(winTime*3)*0.3;
       ctx.globalAlpha = pulse;
       ctx.fillStyle = '#ffd700';
-      ctx.font = `bold ${Math.min(22, W*0.04)}px sans-serif`;
-      ctx.fillText('🌟 Tap to Play Again! 🌟', W/2, H*0.88);
+      ctx.font = `bold ${Math.min(22,W*0.04)}px sans-serif`;
+      ctx.fillText('🌟 Tap to Race Again! 🌟', W/2, H*0.92);
       ctx.globalAlpha = 1;
     }
   }
@@ -1149,65 +953,59 @@ function draw() {
   ctx.clearRect(0, 0, W, H);
 
   if (gameState === 'title') { drawTitle(); return; }
-  if (gameState === 'win' || gameState === 'lose') { drawEndScreen(); return; }
+  if (gameState === 'win') { drawWinScreen(); return; }
 
-  // Shake
-  ctx.save();
-  if (shakeAmount > 0.5) {
-    ctx.translate((Math.random()-0.5)*shakeAmount, (Math.random()-0.5)*shakeAmount);
-  }
+  // --- Playing ---
+  drawPlayBackground();
 
-  drawBackground();
-
-  // Rainbow trail
+  // Rainbow trail behind unicorn
+  const trailColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
   if (unicorn.trail.length > 1) {
-    const trailColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
     unicorn.trail.forEach((t, i) => {
-      if (i === 0) return;
-      ctx.globalAlpha = t.life * 0.5;
-      ctx.strokeStyle = trailColors[i % trailColors.length];
-      ctx.lineWidth = t.life * 6;
+      if (i===0) return;
+      ctx.globalAlpha = t.life * 0.4;
+      ctx.strokeStyle = trailColors[i%trailColors.length];
+      ctx.lineWidth = t.life * 5;
       ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(unicorn.trail[i-1].x, unicorn.trail[i-1].y);
-      ctx.lineTo(t.x, t.y);
+      ctx.moveTo(unicorn.trail[i-1].x, unicorn.trail[i-1].y + (i-1)*2);
+      ctx.lineTo(t.x, t.y + i*2);
       ctx.stroke();
     });
     ctx.globalAlpha = 1;
   }
 
-  // Swirls
-  swirls.forEach(drawSwirl);
-
-  // Powerups
-  powerups.forEach(drawPowerup);
-
-  // Orbiting stars
-  unicorn.orbStars.forEach(s => {
-    const sx = unicorn.x + Math.cos(s.angle)*s.dist;
-    const sy = unicorn.y + Math.sin(s.angle)*s.dist;
-    drawStar(sx, sy, 6, 4, '#ffd700');
+  // Draw rainbows on screen
+  const viewRange = 600;
+  trackRainbows.forEach((rb, i) => {
+    if (collectedSet.has(i)) return;
+    const relY = (rb.y - distance) / viewRange;
+    if (relY < -0.05 || relY > 1.05) return;
+    const screenY = H * (1 - relY * 0.85 - 0.08);
+    const screenX = rb.x * W;
+    const bob = Math.sin(Date.now()/400 + i) * 5;
+    drawRainbow(screenX, screenY + bob, rb.type);
   });
 
-  // Unicorn
-  drawUnicorn(unicorn.x, unicorn.y, unicorn.angle, unicorn.sparkle);
+  // Draw finish rainbow if visible
+  const finishRelY = (TRACK_LENGTH - distance) / viewRange;
+  if (finishRelY >= -0.1 && finishRelY <= 1.1) {
+    const finishScreenY = H * (1 - finishRelY * 0.85 - 0.08);
+    drawFinishRainbow(finishScreenY);
+  }
+
+  // Draw unicorn
+  const ux = unicorn.x * W;
+  const uy = H * 0.72;
+  drawUnicorn(ux, uy, unicorn.sparkle);
 
   // Particles
   particles.forEach(p => {
-    ctx.globalAlpha = p.life;
-    ctx.fillStyle = p.color;
-    if (p.type === 'star') drawStar(p.x, p.y, p.size, 4, p.color);
-    else { ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill(); }
+    ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
+    if (p.type==='star') drawStar(p.x,p.y,p.size,4,p.color);
+    else { ctx.beginPath(); ctx.arc(p.x,p.y,p.size,0,Math.PI*2); ctx.fill(); }
   });
   ctx.globalAlpha = 1;
-
-  // Flash effect
-  if (flashAlpha > 0.01) {
-    ctx.fillStyle = `rgba(255,255,255,${flashAlpha})`;
-    ctx.fillRect(0, 0, W, H);
-  }
-
-  ctx.restore();
 
   drawHUD();
 }
@@ -1222,7 +1020,8 @@ function gameLoop(timestamp) {
 }
 
 // --- Start ---
-initBG();
+initBGClouds();
+generateTrack();
 requestAnimationFrame(gameLoop);
 
 </script>
