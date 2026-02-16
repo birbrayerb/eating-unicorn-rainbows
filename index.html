@@ -281,14 +281,23 @@ function finishNameEntry() {
 // --- Title Screen Click ---
 let _diffBtns = []; // stored by drawTitle for hit detection
 let _lbTabBtns = []; // leaderboard tab buttons
+let _startBtn = null; // start button
 
 function handleTitleClick(cx, cy) {
-  // Check difficulty buttons
+  // Check start button
+  if (_startBtn) {
+    if (cx >= _startBtn.x && cx <= _startBtn.x+_startBtn.w && cy >= _startBtn.y && cy <= _startBtn.y+_startBtn.h) {
+      startGame();
+      return;
+    }
+  }
+  // Check difficulty buttons — just select, don't start
   for (const btn of _diffBtns) {
     if (cx >= btn.x && cx <= btn.x+btn.w && cy >= btn.y && cy <= btn.y+btn.h) {
       currentDifficulty = btn.key;
       selectedDifficultyForLB = btn.key;
-      startGame();
+      leaderboard = leaderboards[btn.key] || [];
+      fetchLeaderboard(btn.key);
       return;
     }
   }
@@ -798,7 +807,7 @@ function drawTitle() {
   const instrSpacing = Math.min(22, H*0.032);
   const btnH = Math.min(50, H*0.065);
   const pickLabelH = 20;
-  const gap1 = 20; // after unicorn+title
+  const gap1 = 35; // after unicorn+title
   const gap2 = 18; // after instructions
   const gap3 = 24; // after "pick difficulty" label
   const gap4 = 20; // after buttons before leaderboard
@@ -880,9 +889,9 @@ function drawTitle() {
     ctx.beginPath(); ctx.roundRect(bx, by, singleBtnW, btnH, 12); ctx.fill();
     ctx.shadowBlur = 0;
 
-    // Border if selected for LB
-    if (key === selectedDifficultyForLB) {
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+    // Border if selected
+    if (key === currentDifficulty) {
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.roundRect(bx, by, singleBtnW, btnH, 12); ctx.stroke();
     }
 
@@ -895,9 +904,29 @@ function drawTitle() {
     ctx.fillText(d.label, bx+singleBtnW/2, by+btnH*0.72);
   });
 
+  // START button
+  const startBtnW = Math.min(200, W*0.5);
+  const startBtnH = Math.min(50, H*0.065);
+  const startBtnX = (W - startBtnW) / 2;
+  const startBtnY = btnY + btnH + 18;
+  _startBtn = { x: startBtnX, y: startBtnY, w: startBtnW, h: startBtnH };
+
+  // Pulsing glow
+  const pulse = 0.8 + Math.sin(t*3)*0.2;
+  ctx.shadowColor = '#4dff88'; ctx.shadowBlur = 15 * pulse;
+  const startGrad = ctx.createLinearGradient(startBtnX, startBtnY, startBtnX+startBtnW, startBtnY);
+  startGrad.addColorStop(0, '#4dff88');
+  startGrad.addColorStop(1, '#00cc66');
+  ctx.fillStyle = startGrad;
+  ctx.beginPath(); ctx.roundRect(startBtnX, startBtnY, startBtnW, startBtnH, startBtnH/2); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.min(22, W*0.04)}px sans-serif`;
+  ctx.fillText('🏁 START! 🏁', W/2, startBtnY + startBtnH*0.65);
+
   // Leaderboard
   _lbTabBtns = [];
-  const scoresLbY = btnY + btnH + gap4;
+  const scoresLbY = startBtnY + startBtnH + gap4;
   const lbScores = leaderboards[selectedDifficultyForLB] || [];
   if (lbScores.length > 0) {
     ctx.fillStyle = '#ffd700';
