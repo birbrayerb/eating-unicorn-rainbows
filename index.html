@@ -323,11 +323,12 @@ function update(dt) {
   if (keys['arrowleft'] || keys['a']) moveDir = -1;
   if (keys['arrowright'] || keys['d']) moveDir = 1;
 
-  // Touch: smoothly move toward finger X position
+  // Touch: smoothly move toward finger X position (convert pixel to 0-1 range)
   if (touchActive && touchTargetX !== null) {
-    const dx = touchTargetX - unicorn.x;
-    if (Math.abs(dx) > 2) {
-      unicorn.x += dx * 6 * dt; // smooth follow
+    const targetNorm = touchTargetX / W; // convert pixel X to 0-1
+    const dx = targetNorm - unicorn.x;
+    if (Math.abs(dx) > 0.005) {
+      unicorn.x += dx * 8 * dt; // smooth follow
     }
   }
   // Keyboard always works too
