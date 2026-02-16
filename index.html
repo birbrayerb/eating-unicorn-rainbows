@@ -14,7 +14,7 @@ canvas { display:block; width:100%; height:100%; }
 <canvas id="c"></canvas>
 <script>
 // ============================================================
-// 🦄 EATING UNICORN RAINBOWS — Vertical Racer Edition 🌈
+// 🦄 EATING UNICORN RAINBOWS — Ultimate Edition 🌈
 // ============================================================
 
 const canvas = document.getElementById('c');
@@ -55,6 +55,20 @@ function playEatSound(pts) {
   if (pts >= 50) setTimeout(() => playChime(base * 1.5, 0.12, 0.06), 100);
 }
 
+function playObstacleHit() {
+  playChime(150, 0.3, 0.15, 'sawtooth');
+  setTimeout(() => playChime(120, 0.2, 0.1, 'sawtooth'), 80);
+}
+
+function playPowerUp() {
+  [523,659,784,1047].forEach((f,i) => setTimeout(() => playChime(f, 0.15, 0.1, 'triangle'), i*60));
+}
+
+function playComboBreak() {
+  playChime(200, 0.3, 0.1, 'square');
+  setTimeout(() => playChime(150, 0.3, 0.08, 'square'), 100);
+}
+
 function playWinFanfare() {
   const notes = [523,659,784,1047,784,1047,1319,1047,1319,1568];
   notes.forEach((f,i) => setTimeout(() => playChime(f, 0.4, 0.12, i%2?'sine':'triangle'), i*150));
@@ -73,13 +87,19 @@ function startMelody() {
 }
 function stopMelody() { clearInterval(melodyInterval); melodyInterval = null; }
 
-// --- Seeded Random for track layout ---
+// --- Seeded Random ---
 function seededRandom(seed) {
   let s = seed;
   return function() {
     s = (s * 1664525 + 1013904223) & 0xFFFFFFFF;
     return (s >>> 0) / 0xFFFFFFFF;
   };
+}
+
+// --- Curving Lane ---
+function getLaneCenterOffset(trackY) {
+  // Returns offset in 0-1 range (centered at 0.5)
+  return Math.sin(trackY * 0.0008) * 0.15 + Math.sin(trackY * 0.0003 + 2.5) * 0.1;
 }
 
 // --- Difficulty Levels ---
@@ -92,27 +112,104 @@ const DIFFICULTIES = {
 };
 const DIFFICULTY_ORDER = ['easy','medium','hard','extreme','crazy'];
 let currentDifficulty = 'easy';
-let selectedDifficultyForLB = 'easy'; // which difficulty's leaderboard to show on title
+let selectedDifficultyForLB = 'easy';
+
+// --- Skins System ---
+const SKINS = [
+  { id: 'default', name: 'Default', threshold: 0, bodyColor: '#fff', strokeColor: '#e8d5f0', particleColors: ['#ff6b9d','#4dc9ff','#ffd700'] },
+  { id: 'pink', name: 'Pink Sparkle', threshold: 500, bodyColor: '#ffb6d9', strokeColor: '#ff69b4', particleColors: ['#ff69b4','#ff9ec4','#fff0f5'] },
+  { id: 'galaxy', name: 'Galaxy', threshold: 2000, bodyColor: '#4a0e6b', strokeColor: '#8b5cf6', particleColors: ['#8b5cf6','#06b6d4','#f0abfc'] },
+  { id: 'golden', name: 'Golden', threshold: 5000, bodyColor: '#ffd700', strokeColor: '#daa520', particleColors: ['#ffd700','#ffec80','#fff8dc'] },
+  { id: 'rainbow', name: 'Rainbow', threshold: 10000, bodyColor: 'rainbow', strokeColor: '#fff', particleColors: ['#ff0000','#ff8800','#ffdd00','#00cc44','#0088ff','#cc44cc'] },
+  { id: 'diamond', name: 'Diamond', threshold: 25000, bodyColor: 'rgba(200,230,255,0.7)', strokeColor: '#e0f0ff', particleColors: ['#e0f0ff','#c0e0ff','#ffffff'] },
+];
+
+function loadCumulativeScore() { return parseInt(localStorage.getItem('unicorn_cumulative_score') || '0'); }
+function saveCumulativeScore(s) { localStorage.setItem('unicorn_cumulative_score', String(s)); }
+function loadSelectedSkin() { return localStorage.getItem('unicorn_selected_skin') || 'default'; }
+function saveSelectedSkin(id) { localStorage.setItem('unicorn_selected_skin', id); }
+
+let cumulativeScore = loadCumulativeScore();
+let selectedSkin = loadSelectedSkin();
+
+function getSkin() { return SKINS.find(s => s.id === selectedSkin) || SKINS[0]; }
+function isSkinUnlocked(skin) { return cumulativeScore >= skin.threshold; }
 
 // --- Track Generation ---
 const TRACK_LENGTH = 10000;
 let trackRainbows = [];
+let trackObstacles = [];
+let trackPowerUps = [];
+let trackStars = [];
+let trackSeed = 0;
+let isDailyChallenge = false;
 
-function generateTrack() {
+function getDailySeed() {
+  const d = new Date();
+  return d.getFullYear() * 10000 + (d.getMonth()+1) * 100 + d.getDate();
+}
+
+function generateTrack(seed) {
   const diff = DIFFICULTIES[currentDifficulty];
-  const rng = seededRandom(diff.seed);
+  trackSeed = seed !== undefined ? seed : (diff.seed ^ (Date.now() & 0xFFFFFF));
+  const rng = seededRandom(trackSeed);
+  
   trackRainbows = [];
+  trackObstacles = [];
+  trackPowerUps = [];
+  trackStars = [];
+
+  // Rainbows
   for (let y = 200; y < TRACK_LENGTH - 200; y += diff.spacing) {
     const r = rng();
+    const laneOffset = getLaneCenterOffset(y);
+    const baseX = 0.5 + laneOffset;
+    // Cluster around the curving lane center
+    const spread = 0.25;
+    const x = baseX + (rng() - 0.5) * spread * 2;
+    const clampedX = Math.max(0.08, Math.min(0.92, x));
+    
     if (r < 0.45) {
-      trackRainbows.push({ y, x: rng() * 0.8 + 0.1, type: 'small', points: 10, swayOffset: rng()*Math.PI*2 });
+      trackRainbows.push({ y, x: clampedX, type: 'small', points: 10, swayOffset: rng()*Math.PI*2 });
     } else if (r < 0.58) {
-      trackRainbows.push({ y, x: rng() * 0.8 + 0.1, type: 'big', points: 50, swayOffset: rng()*Math.PI*2 });
+      trackRainbows.push({ y, x: clampedX, type: 'big', points: 50, swayOffset: rng()*Math.PI*2 });
     } else if (r < 0.62) {
-      trackRainbows.push({ y, x: rng() * 0.8 + 0.1, type: 'gold', points: 100, swayOffset: rng()*Math.PI*2 });
+      trackRainbows.push({ y, x: clampedX, type: 'gold', points: 100, swayOffset: rng()*Math.PI*2 });
     }
   }
-  trackStars = [];
+
+  // Obstacles — start sparse, get denser
+  for (let y = 400; y < TRACK_LENGTH - 300; y += Math.max(40, 120 - (y / TRACK_LENGTH) * 80)) {
+    const r = rng();
+    const progress = y / TRACK_LENGTH;
+    const spawnChance = 0.15 + progress * 0.35; // 15% at start, 50% at end
+    if (r < spawnChance) {
+      const laneOffset = getLaneCenterOffset(y);
+      const baseX = 0.5 + laneOffset;
+      const x = Math.max(0.08, Math.min(0.92, baseX + (rng() - 0.5) * 0.5));
+      const obstType = rng() < 0.6 ? 'cloud' : 'star';
+      trackObstacles.push({
+        y, x, type: obstType,
+        slowDuration: obstType === 'cloud' ? 2.0 : 1.5,
+        swayOffset: rng() * Math.PI * 2,
+        rotation: rng() * Math.PI * 2,
+      });
+    }
+  }
+
+  // Power-ups — rarer
+  for (let y = 600; y < TRACK_LENGTH - 500; y += 300 + rng() * 200) {
+    if (rng() < 0.5) {
+      const laneOffset = getLaneCenterOffset(y);
+      const baseX = 0.5 + laneOffset;
+      const x = Math.max(0.1, Math.min(0.9, baseX + (rng() - 0.5) * 0.3));
+      const types = ['magnet', 'shield', 'rocket', 'giant'];
+      const type = types[Math.floor(rng() * types.length)];
+      trackPowerUps.push({ y, x, type, swayOffset: rng() * Math.PI * 2 });
+    }
+  }
+
+  // Background stars
   for (let y = 0; y < TRACK_LENGTH; y += 30) {
     if (rng() < 0.3) {
       trackStars.push({ y, x: rng(), size: rng()*2+1, twinkleOffset: rng()*Math.PI*2 });
@@ -120,15 +217,13 @@ function generateTrack() {
   }
 }
 
-let trackStars = [];
-
 // --- Leaderboard ---
 let leaderboard = [];
 let showingNameEntry = false;
 let pendingScore = 0;
 let nameInput = '';
-
 let leaderboards = { easy:[], medium:[], hard:[], extreme:[], crazy:[] };
+let dailyLeaderboards = { easy:[], medium:[], hard:[], extreme:[], crazy:[] };
 
 async function fetchLeaderboard(diff) {
   diff = diff || selectedDifficultyForLB;
@@ -141,9 +236,10 @@ async function fetchLeaderboard(diff) {
 
 async function submitScore(name, sc) {
   try {
+    const suffix = isDailyChallenge ? '&daily=true' : '';
     const r = await fetch('/api/scores', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, score: sc, difficulty: currentDifficulty })
+      body: JSON.stringify({ name, score: sc, difficulty: currentDifficulty, daily: isDailyChallenge })
     });
     const d = await r.json();
     if (d.scores) { leaderboards[currentDifficulty] = d.scores; leaderboard = d.scores; }
@@ -155,24 +251,77 @@ fetchLeaderboard('easy');
 // --- Game State ---
 let gameState = 'title'; // title, playing, win
 let score = 0;
-let distance = 0; // how far along the track (0 to TRACK_LENGTH)
+let distance = 0;
 let titleTime = 0;
 let winTime = 0;
-let collectedSet = new Set(); // indices of collected rainbows
+let collectedSet = new Set();
+let collectedObstacles = new Set();
+let collectedPowerUps = new Set();
 
-// Speed: from difficulty settings
-function getSpeed() { return DIFFICULTIES[currentDifficulty].speed; }
+// Combo system
+let combo = 0;
+let comboTimer = 0; // visual display timer
+let lastComboText = '';
+let comboBreakEffect = 0;
+
+// Floating texts
+let floatingTexts = [];
+
+// Power-up state
+let activePowerUp = null; // { type, timeLeft }
+
+// Slow effect
+let slowTimer = 0;
+let slowFactor = 1.0;
+
+// Sprint
+let sprintActive = false;
+let sprintFlashTimer = 0;
+
+// Screen shake
+let shakeAmount = 0;
+
+// Speed
+function getBaseSpeed() { return DIFFICULTIES[currentDifficulty].speed; }
+
+function getCurrentSpeed() {
+  const base = getBaseSpeed();
+  const progress = distance / TRACK_LENGTH;
+  // Progressive speed: ramp up 30% over the track
+  let speed = base * (1 + progress * 0.3);
+  // Sprint: last 20%
+  if (progress >= 0.8) {
+    speed *= 1.4;
+  }
+  // Slow debuff
+  if (slowTimer > 0) {
+    speed *= 0.4;
+  }
+  // Rocket power-up
+  if (activePowerUp && activePowerUp.type === 'rocket') {
+    speed *= 2.0;
+  }
+  return speed;
+}
+
+function getComboMultiplier() {
+  if (combo >= 10) return 3;
+  if (combo >= 6) return 2;
+  if (combo >= 3) return 1.5;
+  return 1;
+}
 
 // --- Unicorn ---
 const unicorn = {
-  x: 0.5, // 0-1 horizontal position (fraction of screen width)
+  x: 0.5,
   trail: [],
   sparkle: 0,
   blinkTimer: 3,
+  scale: 1, // for giant mode
 };
 
-const UNICORN_MOVE_SPEED = 1.8; // fraction of screen per second
-let moveDir = 0; // -1, 0, 1
+const UNICORN_MOVE_SPEED = 1.8;
+let moveDir = 0;
 
 // --- Particles & effects ---
 let particles = [];
@@ -212,9 +361,13 @@ function spawnFirework(x, y) {
   }
 }
 
+function addFloatingText(x, y, text, color) {
+  floatingTexts.push({ x, y, text, color, life: 1.0, vy: -1.5 });
+}
+
 // --- Input ---
 let keys = {};
-let touchTargetX = null; // finger X position — unicorn follows horizontally
+let touchTargetX = null;
 let touchActive = false;
 
 document.addEventListener('keydown', e => {
@@ -235,7 +388,6 @@ canvas.addEventListener('pointerdown', e => {
     if (showingNameEntry) { handleNameClick(e.clientX, e.clientY); return; }
     if (winTime > 2) { resetToTitle(); return; }
   }
-  // Playing: unicorn follows finger horizontally
   touchTargetX = e.clientX;
   touchActive = true;
 });
@@ -279,19 +431,27 @@ function finishNameEntry() {
 }
 
 // --- Title Screen Click ---
-let _diffBtns = []; // stored by drawTitle for hit detection
-let _lbTabBtns = []; // leaderboard tab buttons
-let _startBtn = null; // start button
+let _diffBtns = [];
+let _lbTabBtns = [];
+let _startBtn = null;
+let _dailyBtn = null;
+let _skinBtns = [];
 
 function handleTitleClick(cx, cy) {
-  // Check start button
   if (_startBtn) {
     if (cx >= _startBtn.x && cx <= _startBtn.x+_startBtn.w && cy >= _startBtn.y && cy <= _startBtn.y+_startBtn.h) {
+      isDailyChallenge = false;
       startGame();
       return;
     }
   }
-  // Check difficulty buttons — just select, don't start
+  if (_dailyBtn) {
+    if (cx >= _dailyBtn.x && cx <= _dailyBtn.x+_dailyBtn.w && cy >= _dailyBtn.y && cy <= _dailyBtn.y+_dailyBtn.h) {
+      isDailyChallenge = true;
+      startGame(getDailySeed());
+      return;
+    }
+  }
   for (const btn of _diffBtns) {
     if (cx >= btn.x && cx <= btn.x+btn.w && cy >= btn.y && cy <= btn.y+btn.h) {
       currentDifficulty = btn.key;
@@ -301,7 +461,16 @@ function handleTitleClick(cx, cy) {
       return;
     }
   }
-  // Check leaderboard tab buttons
+  for (const btn of _skinBtns) {
+    if (cx >= btn.x && cx <= btn.x+btn.w && cy >= btn.y && cy <= btn.y+btn.h) {
+      if (isSkinUnlocked(btn.skin)) {
+        selectedSkin = btn.skin.id;
+        saveSelectedSkin(btn.skin.id);
+        playChime(600, 0.15, 0.08);
+      }
+      return;
+    }
+  }
   for (const btn of _lbTabBtns) {
     if (cx >= btn.x && cx <= btn.x+btn.w && cy >= btn.y && cy <= btn.y+btn.h) {
       selectedDifficultyForLB = btn.key;
@@ -313,13 +482,20 @@ function handleTitleClick(cx, cy) {
 }
 
 // --- Game Flow ---
-function startGame() {
+function startGame(seed) {
   gameState = 'playing';
   score = 0; distance = 0;
-  unicorn.x = 0.5; unicorn.trail = []; unicorn.sparkle = 0;
+  unicorn.x = 0.5; unicorn.trail = []; unicorn.sparkle = 0; unicorn.scale = 1;
   collectedSet = new Set();
-  particles = []; fireworks = [];
-  generateTrack();
+  collectedObstacles = new Set();
+  collectedPowerUps = new Set();
+  particles = []; fireworks = []; floatingTexts = [];
+  combo = 0; comboTimer = 0; comboBreakEffect = 0;
+  activePowerUp = null;
+  slowTimer = 0; slowFactor = 1.0;
+  sprintActive = false; sprintFlashTimer = 0;
+  shakeAmount = 0;
+  generateTrack(seed);
   startMelody();
 }
 
@@ -329,6 +505,30 @@ function resetToTitle() {
   particles = []; fireworks = [];
   selectedDifficultyForLB = currentDifficulty;
   fetchLeaderboard(currentDifficulty);
+}
+
+// --- Combo check: detect missed rainbows ---
+function checkMissedRainbows() {
+  const viewRange = 600;
+  const laneWidth = 0.3; // road area half-width for "reasonable range"
+  trackRainbows.forEach((rb, i) => {
+    if (collectedSet.has(i)) return;
+    if (rb._missed) return;
+    const relY = (rb.y - distance) / viewRange;
+    // Rainbow has passed below the unicorn
+    if (relY < -0.05) {
+      // Only count as miss if it was within the road area horizontally
+      const laneCenter = 0.5 + getLaneCenterOffset(rb.y);
+      if (Math.abs(rb.x - laneCenter) < laneWidth) {
+        rb._missed = true;
+        if (combo >= 3) {
+          comboBreakEffect = 1.0;
+          playComboBreak();
+        }
+        combo = 0;
+      }
+    }
+  });
 }
 
 // --- Update ---
@@ -346,8 +546,38 @@ function update(dt) {
   }
 
   // --- Playing ---
-  // Move forward
-  distance += getSpeed() * dt;
+  const speed = getCurrentSpeed();
+  distance += speed * dt;
+
+  // Sprint detection
+  const progress = distance / TRACK_LENGTH;
+  if (progress >= 0.8 && !sprintActive) {
+    sprintActive = true;
+    sprintFlashTimer = 2.0;
+  }
+  if (sprintFlashTimer > 0) sprintFlashTimer -= dt;
+
+  // Slow timer
+  if (slowTimer > 0) slowTimer -= dt;
+
+  // Power-up timer
+  if (activePowerUp) {
+    activePowerUp.timeLeft -= dt;
+    if (activePowerUp.timeLeft <= 0) {
+      if (activePowerUp.type === 'giant') unicorn.scale = 1;
+      activePowerUp = null;
+    }
+  }
+
+  // Giant mode scale
+  if (activePowerUp && activePowerUp.type === 'giant') {
+    unicorn.scale = Math.min(2, unicorn.scale + dt * 4);
+  } else {
+    unicorn.scale = Math.max(1, unicorn.scale - dt * 4);
+  }
+
+  // Screen shake decay
+  if (shakeAmount > 0) shakeAmount *= 0.92;
 
   // Check win
   if (distance >= TRACK_LENGTH) {
@@ -355,6 +585,9 @@ function update(dt) {
     gameState = 'win'; winTime = 0;
     playWinFanfare();
     for (let i=0;i<10;i++) spawnFirework(Math.random()*W, Math.random()*H*0.5);
+    // Update cumulative score
+    cumulativeScore += score;
+    saveCumulativeScore(cumulativeScore);
     // Check if top 10
     const minTop10 = leaderboard.length >= 10 ? leaderboard[leaderboard.length-1].score : 0;
     if (score > minTop10 || leaderboard.length < 10) {
@@ -374,70 +607,172 @@ function update(dt) {
   if (keys['arrowleft'] || keys['a']) moveDir = -1;
   if (keys['arrowright'] || keys['d']) moveDir = 1;
 
-  // Touch: smoothly move toward finger X position (convert pixel to 0-1 range)
   if (touchActive && touchTargetX !== null) {
-    const targetNorm = touchTargetX / W; // convert pixel X to 0-1
+    const targetNorm = touchTargetX / W;
     const dx = targetNorm - unicorn.x;
     if (Math.abs(dx) > 0.005) {
-      unicorn.x += dx * 8 * dt; // smooth follow
+      unicorn.x += dx * 8 * dt;
     }
   }
-  // Keyboard always works too
   unicorn.x += moveDir * UNICORN_MOVE_SPEED * dt;
   unicorn.x = Math.max(0.05, Math.min(0.95, unicorn.x));
 
   // Trail
   if (Math.random() < 0.5) {
-    unicorn.trail.push({ x: unicorn.x * W, y: H * 0.72, life: 1 });
+    const skin = getSkin();
+    const trailColor = skin.particleColors[Math.floor(Math.random()*skin.particleColors.length)];
+    unicorn.trail.push({ x: unicorn.x * W, y: H * 0.72, life: 1, color: trailColor });
     if (unicorn.trail.length > 25) unicorn.trail.shift();
   }
   unicorn.trail.forEach(t => t.life -= 0.03);
   unicorn.trail = unicorn.trail.filter(t => t.life > 0);
 
+  // Rocket fire trail
+  if (activePowerUp && activePowerUp.type === 'rocket') {
+    for (let i = 0; i < 3; i++) {
+      particles.push({
+        x: unicorn.x * W + (Math.random()-0.5)*20,
+        y: H * 0.72 + 30,
+        vx: (Math.random()-0.5)*2,
+        vy: Math.random()*3+1,
+        life: 1, decay: 0.04,
+        color: Math.random() < 0.5 ? '#ff4400' : '#ffaa00',
+        size: Math.random()*6+3,
+        type: 'circle',
+      });
+    }
+    shakeAmount = 3;
+  }
+
   // Blink
   unicorn.blinkTimer -= dt;
   if (unicorn.blinkTimer <= 0) unicorn.blinkTimer = 2 + Math.random()*3;
 
-  // Rainbow collision
-  const ux = unicorn.x; // 0-1
-  const collectRadius = 0.06; // fraction of screen width
-  const collectDistY = 150; // how far ahead/behind in track units to check
+  // --- Collision detection ---
+  const viewRange = 600;
+  const ux = unicorn.x;
+  const unicornScreenY = H * 0.72;
+  const unicornScreenX = unicorn.x * W;
+  const scaledHitRadius = unicorn.scale;
 
+  // Magnet: pull rainbows toward unicorn
+  if (activePowerUp && activePowerUp.type === 'magnet') {
+    const magnetRadius = 0.25; // fraction of screen width
+    trackRainbows.forEach((rb, i) => {
+      if (collectedSet.has(i)) return;
+      const relY = (rb.y - distance) / viewRange;
+      if (relY < -0.1 || relY > 1.1) return;
+      const dx = unicorn.x - rb.x;
+      const dist = Math.abs(dx);
+      if (dist < magnetRadius) {
+        rb.x += dx * 3 * dt; // pull toward unicorn
+      }
+    });
+  }
+
+  // Rainbow collision
   trackRainbows.forEach((rb, i) => {
     if (collectedSet.has(i)) return;
-    const dy = rb.y - distance;
-    // Only check if near the unicorn vertically (on screen)
-    if (Math.abs(dy - H*0.25) > collectDistY) return; // unicorn is at ~75% from top visually, map that
-    // Convert track position to screen Y
-    const screenY = H - (rb.y - distance) * (H / (TRACK_LENGTH * 0.015));
-    // Actually, simpler: the visible window is distance to distance + viewRange
-    const viewRange = 600; // track units visible on screen
-    const relY = (rb.y - distance) / viewRange; // 0 = at unicorn level, 1 = top of screen
+    const relY = (rb.y - distance) / viewRange;
     if (relY < -0.1 || relY > 1.1) return;
 
     const screenRbY = H * (1 - relY * 0.85 - 0.08);
-    const unicornScreenY = H * 0.72;
     let screenRbX = rb.x * W;
     if (DIFFICULTIES[currentDifficulty].sway) {
       screenRbX += Math.sin(Date.now()/500 + rb.swayOffset) * 40;
     }
-    const unicornScreenX = unicorn.x * W;
 
     const dx = screenRbX - unicornScreenX;
     const dyScreen = screenRbY - unicornScreenY;
     const dist = Math.sqrt(dx*dx + dyScreen*dyScreen);
     const hm = DIFFICULTIES[currentDifficulty].hitMult;
-    const hitRadius = (rb.type === 'big' ? 45 : rb.type === 'gold' ? 40 : 35) * hm;
+    const hitRadius = (rb.type === 'big' ? 45 : rb.type === 'gold' ? 40 : 35) * hm * scaledHitRadius;
 
     if (dist < hitRadius) {
       collectedSet.add(i);
-      score += rb.points;
+      const mult = getComboMultiplier();
+      const pts = Math.round(rb.points * mult);
+      score += pts;
+      combo++;
+      comboTimer = 2.0;
+      
       unicorn.sparkle = 1;
       playEatSound(rb.points);
+      
       const color = rb.type === 'gold' ? '#ffd700' : rb.type === 'big' ? '#ff6b9d' : '#4dc9ff';
       spawnParticles(screenRbX, screenRbY, color, rb.type === 'gold' ? 20 : 10, rb.type === 'gold' ? 5 : 3);
+      
+      // Floating text
+      const multText = mult > 1 ? ` x${mult}!` : '';
+      addFloatingText(screenRbX, screenRbY - 20, `+${pts}${multText}`, color);
     }
   });
+
+  // Obstacle collision
+  trackObstacles.forEach((obs, i) => {
+    if (collectedObstacles.has(i)) return;
+    const relY = (obs.y - distance) / viewRange;
+    if (relY < -0.1 || relY > 1.1) return;
+
+    const screenObsY = H * (1 - relY * 0.85 - 0.08);
+    let screenObsX = obs.x * W;
+
+    const dx = screenObsX - unicornScreenX;
+    const dyScreen = screenObsY - unicornScreenY;
+    const dist = Math.sqrt(dx*dx + dyScreen*dyScreen);
+    const hitRadius = obs.type === 'cloud' ? 35 : 25;
+
+    if (dist < hitRadius * scaledHitRadius) {
+      collectedObstacles.add(i);
+      // Shield blocks slowdown
+      if (activePowerUp && activePowerUp.type === 'shield') {
+        spawnParticles(screenObsX, screenObsY, '#4dc9ff', 10, 4);
+        addFloatingText(screenObsX, screenObsY - 20, '🛡️ Blocked!', '#4dc9ff');
+      } else {
+        slowTimer = obs.slowDuration;
+        playObstacleHit();
+        spawnParticles(screenObsX, screenObsY, '#8b00ff', 12, 4);
+        shakeAmount = 8;
+        addFloatingText(screenObsX, screenObsY - 20, 'SLOW! 💫', '#ff4444');
+      }
+    }
+  });
+
+  // Power-up collision
+  trackPowerUps.forEach((pu, i) => {
+    if (collectedPowerUps.has(i)) return;
+    const relY = (pu.y - distance) / viewRange;
+    if (relY < -0.1 || relY > 1.1) return;
+
+    const screenPuY = H * (1 - relY * 0.85 - 0.08);
+    let screenPuX = pu.x * W;
+
+    const dx = screenPuX - unicornScreenX;
+    const dyScreen = screenPuY - unicornScreenY;
+    const dist = Math.sqrt(dx*dx + dyScreen*dyScreen);
+
+    if (dist < 40 * scaledHitRadius) {
+      collectedPowerUps.add(i);
+      const durations = { magnet: 5, shield: 5, rocket: 3, giant: 4 };
+      activePowerUp = { type: pu.type, timeLeft: durations[pu.type] };
+      if (pu.type === 'giant') unicorn.scale = 1.1; // start growing
+      playPowerUp();
+      spawnParticles(screenPuX, screenPuY, '#fff', 15, 5);
+      const icons = { magnet: '🧲', shield: '🛡️', rocket: '🚀', giant: '🦄' };
+      addFloatingText(screenPuX, screenPuY - 30, `${icons[pu.type]} ${pu.type.toUpperCase()}!`, '#fff');
+    }
+  });
+
+  // Check missed rainbows for combo
+  checkMissedRainbows();
+
+  // Combo timer
+  if (comboTimer > 0) comboTimer -= dt;
+  if (comboBreakEffect > 0) comboBreakEffect -= dt * 2;
+
+  // Floating texts
+  floatingTexts.forEach(ft => { ft.y += ft.vy; ft.life -= dt * 0.8; });
+  floatingTexts = floatingTexts.filter(ft => ft.life > 0);
 
   // Particles
   particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.03; p.life -= p.decay; });
@@ -448,7 +783,7 @@ function update(dt) {
 
   // Clouds scroll
   bgClouds.forEach(c => {
-    c.y += getSpeed() * dt * 0.3;
+    c.y += getCurrentSpeed() * dt * 0.3;
     if (c.y > H + 100) { c.y = -100; c.x = Math.random(); }
   });
 }
@@ -475,13 +810,105 @@ function drawCloud(cx, cy, w, alpha) {
   ctx.globalAlpha = 1;
 }
 
+// --- Draw Obstacle ---
+function drawObstacle(x, y, obs) {
+  ctx.save();
+  ctx.translate(x, y);
+  
+  // Warning glow
+  ctx.globalAlpha = 0.3 + Math.sin(Date.now()/200) * 0.15;
+  const warnGrad = ctx.createRadialGradient(0, 0, 5, 0, 0, 45);
+  warnGrad.addColorStop(0, 'rgba(255,100,0,0.4)');
+  warnGrad.addColorStop(1, 'rgba(255,100,0,0)');
+  ctx.fillStyle = warnGrad;
+  ctx.beginPath(); ctx.arc(0, 0, 45, 0, Math.PI*2); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  if (obs.type === 'cloud') {
+    // Dark purple storm cloud
+    ctx.fillStyle = '#3d1a6e';
+    ctx.beginPath(); ctx.ellipse(0, 0, 30, 18, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(-12, -8, 18, 14, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(10, -6, 16, 12, 0, 0, Math.PI*2); ctx.fill();
+    // Lightning sparkles
+    ctx.strokeStyle = '#ffff00';
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.5 + Math.sin(Date.now()/100)*0.5;
+    ctx.beginPath(); ctx.moveTo(-5, 10); ctx.lineTo(0, 18); ctx.lineTo(3, 14); ctx.lineTo(7, 22); ctx.stroke();
+    ctx.globalAlpha = 0.3 + Math.sin(Date.now()/150+1)*0.3;
+    ctx.beginPath(); ctx.moveTo(10, 8); ctx.lineTo(13, 16); ctx.stroke();
+    ctx.globalAlpha = 1;
+  } else {
+    // Spinning star
+    ctx.rotate(Date.now() / 200 + obs.rotation);
+    drawStar(0, 0, 18, 5, '#ff4488');
+    ctx.fillStyle = '#ff88aa';
+    ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI*2); ctx.fill();
+  }
+  
+  ctx.restore();
+}
+
+// --- Draw Power-Up ---
+function drawPowerUpItem(x, y, pu) {
+  ctx.save();
+  ctx.translate(x, y);
+  
+  // Glow
+  const t = Date.now() / 300;
+  ctx.globalAlpha = 0.4 + Math.sin(t) * 0.2;
+  const glowGrad = ctx.createRadialGradient(0, 0, 5, 0, 0, 35);
+  glowGrad.addColorStop(0, 'rgba(255,255,255,0.6)');
+  glowGrad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = glowGrad;
+  ctx.beginPath(); ctx.arc(0, 0, 35, 0, Math.PI*2); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // Box
+  const colors = { magnet: '#ff4444', shield: '#4dc9ff', rocket: '#ff8800', giant: '#c44dff' };
+  ctx.fillStyle = colors[pu.type];
+  ctx.beginPath(); ctx.roundRect(-16, -16, 32, 32, 8); ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.roundRect(-16, -16, 32, 32, 8); ctx.stroke();
+
+  // Icon
+  ctx.font = '18px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const icons = { magnet: '🧲', shield: '🛡️', rocket: '🚀', giant: '🦄' };
+  ctx.fillText(icons[pu.type], 0, 1);
+
+  ctx.restore();
+}
+
 // --- Draw Unicorn ---
 function drawUnicorn(x, y, sparkle) {
   ctx.save();
   ctx.translate(x, y);
-  const sc = 1 + sparkle*0.1;
+  const sc = (1 + sparkle*0.1) * unicorn.scale;
   ctx.scale(sc, sc);
-  // Face upward (toward top of screen)
+
+  const skin = getSkin();
+  let bodyColor = skin.bodyColor;
+  if (bodyColor === 'rainbow') {
+    const hue = (Date.now() / 10) % 360;
+    bodyColor = `hsl(${hue}, 100%, 80%)`;
+  }
+
+  // Shield aura
+  if (activePowerUp && activePowerUp.type === 'shield') {
+    ctx.globalAlpha = 0.3 + Math.sin(Date.now()/200) * 0.15;
+    const shieldGrad = ctx.createRadialGradient(0, 0, 20, 0, 0, 50);
+    shieldGrad.addColorStop(0, 'rgba(77,201,255,0.3)');
+    shieldGrad.addColorStop(1, 'rgba(77,201,255,0)');
+    ctx.fillStyle = shieldGrad;
+    ctx.beginPath(); ctx.arc(0, 0, 50, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = 'rgba(77,201,255,0.6)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, 40, 0, Math.PI*2); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
 
   // Glow
   if (sparkle > 0.1) {
@@ -493,14 +920,39 @@ function drawUnicorn(x, y, sparkle) {
   }
 
   // Body
-  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#e8d5f0'; ctx.lineWidth = 2;
+  ctx.fillStyle = bodyColor;
+  ctx.strokeStyle = skin.strokeColor;
+  ctx.lineWidth = 2;
   ctx.beginPath(); ctx.ellipse(0, 8, 20, 16, 0, 0, Math.PI*2); ctx.fill(); ctx.stroke();
 
-  // Head (above body, facing up)
-  ctx.fillStyle = '#fff';
+  // Head
+  ctx.fillStyle = bodyColor;
   ctx.beginPath(); ctx.ellipse(0, -12, 14, 12, 0, 0, Math.PI*2); ctx.fill(); ctx.stroke();
 
-  // Horn (pointing up)
+  // Diamond sparkles on body
+  if (skin.id === 'diamond') {
+    for (let i = 0; i < 5; i++) {
+      const sx = Math.sin(Date.now()/300 + i*1.3) * 12;
+      const sy = Math.cos(Date.now()/400 + i*1.7) * 10;
+      ctx.globalAlpha = 0.5 + Math.sin(Date.now()/200 + i) * 0.3;
+      drawStar(sx, sy, 3, 4, '#e0f0ff');
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Galaxy stars on body
+  if (skin.id === 'galaxy') {
+    for (let i = 0; i < 6; i++) {
+      const sx = Math.sin(i*1.1) * 14;
+      const sy = Math.cos(i*1.1) * 10 + 2;
+      ctx.globalAlpha = 0.4 + Math.sin(Date.now()/250 + i*2) * 0.4;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(sx, sy, 1.5, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Horn
   ctx.fillStyle = '#ffd700';
   ctx.beginPath(); ctx.moveTo(0, -32); ctx.lineTo(-5, -18); ctx.lineTo(5, -18); ctx.closePath(); ctx.fill();
   ctx.strokeStyle = '#ffec80'; ctx.lineWidth = 1;
@@ -535,34 +987,30 @@ function drawUnicorn(x, y, sparkle) {
   ctx.strokeStyle = '#c77dba'; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.arc(0, -7, 5, 0.3, Math.PI-0.3); ctx.stroke();
 
-  // Mane (rainbow, flowing to the sides)
+  // Mane
   const maneColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
   maneColors.forEach((c, i) => {
     ctx.fillStyle = c; ctx.globalAlpha = 0.8;
     const mx = -12 + i*1.5 + Math.sin(Date.now()/200 + i)*2;
     const my = -5 + i*3;
     ctx.beginPath(); ctx.ellipse(mx, my, 5, 3.5, -0.3+i*0.15, 0, Math.PI*2); ctx.fill();
-    // Mirror right side
     const mx2 = 12 - i*1.5 + Math.sin(Date.now()/200 + i + 3)*2;
     ctx.beginPath(); ctx.ellipse(mx2, my, 5, 3.5, 0.3-i*0.15, 0, Math.PI*2); ctx.fill();
   });
   ctx.globalAlpha = 1;
 
-  // Tail (below, flowing down — rainbow)
+  // Tail
   maneColors.forEach((c, i) => {
     ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.globalAlpha = 0.7;
     ctx.beginPath();
     ctx.moveTo(Math.sin(i)*3, 22);
-    ctx.quadraticCurveTo(
-      Math.sin(Date.now()/250+i)*8, 28+i*3,
-      Math.sin(Date.now()/300+i*0.7)*10, 35+i*4
-    );
+    ctx.quadraticCurveTo(Math.sin(Date.now()/250+i)*8, 28+i*3, Math.sin(Date.now()/300+i*0.7)*10, 35+i*4);
     ctx.stroke();
   });
   ctx.globalAlpha = 1;
 
-  // Legs (running animation)
-  ctx.strokeStyle = '#e8d5f0'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  // Legs
+  ctx.strokeStyle = skin.strokeColor; ctx.lineWidth = 4; ctx.lineCap = 'round';
   const legBob = Math.sin(Date.now()/120)*4;
   [[-9,20,legBob],[9,20,-legBob],[-5,20,-legBob],[5,20,legBob]].forEach(([lx,ly,bob]) => {
     ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx+bob*0.3, ly+10); ctx.stroke();
@@ -577,10 +1025,8 @@ function drawUnicorn(x, y, sparkle) {
 function drawRainbow(x, y, type) {
   ctx.save();
   ctx.translate(x, y);
-
   const r = type === 'big' ? 28 : type === 'gold' ? 24 : 18;
 
-  // Glow
   const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, r*2);
   grad.addColorStop(0, 'rgba(255,200,255,0.25)');
   grad.addColorStop(1, 'rgba(255,200,255,0)');
@@ -595,7 +1041,6 @@ function drawRainbow(x, y, type) {
       ctx.strokeStyle = c; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.arc(0, r*0.3, arcR, Math.PI, 0); ctx.stroke();
     });
-    // Sparkles
     for (let i = 0; i < 5; i++) {
       const a = Math.PI + (i/4)*Math.PI;
       const sr = r - 6;
@@ -603,7 +1048,6 @@ function drawRainbow(x, y, type) {
       drawStar(Math.cos(a)*sr, r*0.3+Math.sin(a)*sr, 4, 4, '#fff');
     }
     ctx.globalAlpha = 1;
-    // Points label
     ctx.fillStyle = '#ffd700'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('100', 0, r*0.3 + r + 12);
   } else {
@@ -615,21 +1059,18 @@ function drawRainbow(x, y, type) {
       ctx.strokeStyle = c; ctx.lineWidth = lineW;
       ctx.beginPath(); ctx.arc(0, r*0.3, arcR, Math.PI, 0); ctx.stroke();
     });
-    // Clouds at feet
     ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.7;
     ctx.beginPath(); ctx.ellipse(-r+2, r*0.3, 5, 3, 0, 0, Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.ellipse(r-2, r*0.3, 5, 3, 0, 0, Math.PI*2); ctx.fill();
     ctx.globalAlpha = 1;
-    // Points label
     ctx.fillStyle = type === 'big' ? '#ff6b9d' : '#4dc9ff';
     ctx.font = `bold ${type==='big'?12:10}px sans-serif`; ctx.textAlign = 'center';
     ctx.fillText(type === 'big' ? '50' : '10', 0, r*0.3 + r + 10);
   }
-
   ctx.restore();
 }
 
-// --- Draw Big Finish Rainbow ---
+// --- Draw Finish Rainbow ---
 function drawFinishRainbow(y) {
   ctx.save();
   ctx.translate(W/2, y);
@@ -641,14 +1082,12 @@ function drawFinishRainbow(y) {
     ctx.strokeStyle = c; ctx.lineWidth = 8;
     ctx.beginPath(); ctx.arc(0, 0, arcR, Math.PI, 0); ctx.stroke();
   });
-  // Sparkles
   for (let i = 0; i < 12; i++) {
     const a = Math.PI + (i/11)*Math.PI;
     ctx.globalAlpha = 0.5 + Math.sin(Date.now()/200+i)*0.4;
     drawStar(Math.cos(a)*(r+15), Math.sin(a)*(r+15), 6, 5, '#ffd700');
   }
   ctx.globalAlpha = 1;
-  // Label
   ctx.fillStyle = '#ffd700'; ctx.font = `bold ${Math.min(24,W*0.05)}px sans-serif`; ctx.textAlign = 'center';
   ctx.fillText('🌈 FINISH! 🌈', 0, -r - 15);
   ctx.restore();
@@ -656,10 +1095,8 @@ function drawFinishRainbow(y) {
 
 // --- Draw Background ---
 function drawPlayBackground() {
-  // Sky gradient
   const progress = distance / TRACK_LENGTH;
   const grad = ctx.createLinearGradient(0, 0, 0, H);
-  // Sky gets brighter as you progress
   const r1 = Math.floor(20 + progress*50);
   const g1 = Math.floor(8 + progress*30);
   const b1 = Math.floor(50 + progress*60);
@@ -686,48 +1123,153 @@ function drawPlayBackground() {
   });
   ctx.globalAlpha = 1;
 
-  // Clouds
   bgClouds.forEach(c => drawCloud(c.x * W, c.y, c.w, c.alpha));
 
-  // Rainbow road lane (subtle center lane)
-  const laneW = W * 0.6;
-  const laneX = (W - laneW) / 2;
-  const laneGrad = ctx.createLinearGradient(laneX, 0, laneX + laneW, 0);
-  laneGrad.addColorStop(0, 'rgba(255,107,157,0)');
-  laneGrad.addColorStop(0.1, 'rgba(255,107,157,0.04)');
-  laneGrad.addColorStop(0.3, 'rgba(255,158,77,0.04)');
-  laneGrad.addColorStop(0.5, 'rgba(255,215,0,0.05)');
-  laneGrad.addColorStop(0.7, 'rgba(77,255,136,0.04)');
-  laneGrad.addColorStop(0.9, 'rgba(77,201,255,0.04)');
-  laneGrad.addColorStop(1, 'rgba(196,77,255,0)');
-  ctx.fillStyle = laneGrad;
-  ctx.fillRect(laneX, 0, laneW, H);
+  // Curving rainbow road lane
+  const laneW = W * 0.5;
+  // Draw lane segments following the curve
+  for (let sy = 0; sy < H; sy += 4) {
+    const trackY = distance + ((H - sy) / H) * viewRange;
+    const offset = getLaneCenterOffset(trackY);
+    const centerX = (0.5 + offset) * W;
+    const alpha = 0.04;
+    const rainbowPos = (sy / H + Date.now() * 0.0001) % 1;
+    const hue = rainbowPos * 360;
+    ctx.fillStyle = `hsla(${hue}, 100%, 70%, ${alpha})`;
+    ctx.fillRect(centerX - laneW/2, sy, laneW, 5);
+  }
 
-  // Lane edge lines (subtle)
+  // Lane edge lines (curved)
   ctx.strokeStyle = 'rgba(255,255,255,0.06)';
   ctx.lineWidth = 2;
   ctx.setLineDash([10, 20]);
-  ctx.beginPath(); ctx.moveTo(laneX, 0); ctx.lineTo(laneX, H); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(laneX+laneW, 0); ctx.lineTo(laneX+laneW, H); ctx.stroke();
+  ctx.beginPath();
+  for (let sy = 0; sy < H; sy += 2) {
+    const trackY = distance + ((H - sy) / H) * viewRange;
+    const offset = getLaneCenterOffset(trackY);
+    const centerX = (0.5 + offset) * W;
+    if (sy === 0) ctx.moveTo(centerX - laneW/2, sy);
+    else ctx.lineTo(centerX - laneW/2, sy);
+  }
+  ctx.stroke();
+  ctx.beginPath();
+  for (let sy = 0; sy < H; sy += 2) {
+    const trackY = distance + ((H - sy) / H) * viewRange;
+    const offset = getLaneCenterOffset(trackY);
+    const centerX = (0.5 + offset) * W;
+    if (sy === 0) ctx.moveTo(centerX + laneW/2, sy);
+    else ctx.lineTo(centerX + laneW/2, sy);
+  }
+  ctx.stroke();
   ctx.setLineDash([]);
+
+  // Sprint edge glow
+  if (sprintActive) {
+    const intensity = 0.15 + Math.sin(Date.now()/200) * 0.1;
+    const edgeGrad = ctx.createLinearGradient(0, 0, W*0.15, 0);
+    edgeGrad.addColorStop(0, `rgba(255,80,0,${intensity})`);
+    edgeGrad.addColorStop(1, 'rgba(255,80,0,0)');
+    ctx.fillStyle = edgeGrad;
+    ctx.fillRect(0, 0, W*0.15, H);
+    const edgeGrad2 = ctx.createLinearGradient(W, 0, W*0.85, 0);
+    edgeGrad2.addColorStop(0, `rgba(255,80,0,${intensity})`);
+    edgeGrad2.addColorStop(1, 'rgba(255,80,0,0)');
+    ctx.fillStyle = edgeGrad2;
+    ctx.fillRect(W*0.85, 0, W*0.15, H);
+  }
 }
 
 // --- Draw HUD ---
 function drawHUD() {
   const progress = distance / TRACK_LENGTH;
-
-  // Difficulty label (top left)
   const diff = DIFFICULTIES[currentDifficulty];
+
+  // Difficulty + Daily label
   ctx.fillStyle = diff.color;
   ctx.font = `bold ${Math.min(13, W*0.025)}px sans-serif`;
   ctx.textAlign = 'left';
-  ctx.fillText(`${diff.emoji} ${diff.label}`, 15, 18);
+  const dailyTag = isDailyChallenge ? ' 📅' : '';
+  ctx.fillText(`${diff.emoji} ${diff.label}${dailyTag}`, 15, 18);
 
-  // Score (top left)
+  // Score
   ctx.fillStyle = '#ffd700';
   ctx.font = `bold ${Math.min(22, W*0.04)}px sans-serif`;
   ctx.textAlign = 'left';
   ctx.fillText(`✨ ${score}`, 15, 42);
+
+  // Combo display
+  if (combo >= 3 && comboTimer > 0) {
+    const comboSize = Math.min(28, W*0.05);
+    const mult = getComboMultiplier();
+    ctx.fillStyle = combo >= 10 ? '#ff0000' : combo >= 6 ? '#ff8800' : '#ffd700';
+    ctx.font = `bold ${comboSize}px sans-serif`;
+    ctx.textAlign = 'center';
+    const pulseScale = 1 + Math.sin(Date.now()/100) * 0.1;
+    ctx.save();
+    ctx.translate(W/2, 35);
+    ctx.scale(pulseScale, pulseScale);
+    ctx.fillText(`${combo}x COMBO! 🔥`, 0, 0);
+    ctx.font = `bold ${comboSize * 0.6}px sans-serif`;
+    ctx.fillText(`${mult}x multiplier`, 0, comboSize * 0.8);
+    ctx.restore();
+  }
+
+  // Combo break effect
+  if (comboBreakEffect > 0) {
+    ctx.globalAlpha = comboBreakEffect;
+    ctx.fillStyle = '#ff0000';
+    ctx.font = `bold ${Math.min(24, W*0.04)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('COMBO BREAK! 💔', W/2, 70);
+    ctx.globalAlpha = 1;
+  }
+
+  // Active power-up
+  if (activePowerUp) {
+    const icons = { magnet: '🧲', shield: '🛡️', rocket: '🚀', giant: '🦄' };
+    const puX = 15;
+    const puY = 62;
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath(); ctx.roundRect(puX, puY, 120, 28, 8); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.min(15, W*0.03)}px sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillText(`${icons[activePowerUp.type]} ${activePowerUp.type.toUpperCase()}`, puX+6, puY+14);
+    // Timer bar
+    const maxDur = { magnet: 5, shield: 5, rocket: 3, giant: 4 }[activePowerUp.type];
+    const frac = activePowerUp.timeLeft / maxDur;
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fillRect(puX+6, puY+20, 108, 4);
+    ctx.fillStyle = '#4dff88';
+    ctx.fillRect(puX+6, puY+20, 108*frac, 4);
+  }
+
+  // Speed indicator
+  const speedPct = Math.round((getCurrentSpeed() / getBaseSpeed()) * 100);
+  ctx.fillStyle = slowTimer > 0 ? '#ff4444' : sprintActive ? '#ff8800' : '#aaa';
+  ctx.font = `bold ${Math.min(12, W*0.024)}px sans-serif`;
+  ctx.textAlign = 'left';
+  ctx.fillText(`⚡ ${speedPct}%`, 15, activePowerUp ? 105 : 62);
+
+  // Sprint flash
+  if (sprintFlashTimer > 0) {
+    ctx.globalAlpha = Math.min(1, sprintFlashTimer);
+    ctx.fillStyle = '#ff4400';
+    ctx.font = `bold ${Math.min(36, W*0.06)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('🔥 SPRINT! 🔥', W/2, H*0.4);
+    ctx.globalAlpha = 1;
+  }
+
+  // Slow indicator
+  if (slowTimer > 0) {
+    ctx.fillStyle = 'rgba(100,0,150,0.3)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ff4444';
+    ctx.font = `bold ${Math.min(20, W*0.035)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('💫 SLOWED! 💫', W/2, H * 0.55);
+  }
 
   // Progress bar (right side, vertical)
   const barH = H * 0.6;
@@ -735,7 +1277,6 @@ function drawHUD() {
   const barX = W - 35;
   const barY = (H - barH) / 2;
 
-  // Label
   ctx.save();
   ctx.fillStyle = '#fff';
   ctx.font = `bold ${Math.min(11, W*0.022)}px sans-serif`;
@@ -744,11 +1285,9 @@ function drawHUD() {
   ctx.fillText('🌈', 0, 0);
   ctx.restore();
 
-  // Bar background
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.beginPath(); ctx.roundRect(barX, barY, barW, barH, barW/2); ctx.fill();
 
-  // Bar fill (from bottom up, rainbow gradient)
   if (progress > 0) {
     const fillH = barH * progress;
     const fGrad = ctx.createLinearGradient(0, barY+barH, 0, barY+barH-fillH);
@@ -764,22 +1303,18 @@ function drawHUD() {
     ctx.fill();
   }
 
-  // Unicorn indicator on progress bar
   const indicatorY = barY + barH - barH * progress;
   ctx.font = '14px sans-serif';
   ctx.textAlign = 'center';
   ctx.fillText('🦄', barX + barW/2 - 16, indicatorY + 5);
-
-  // Finish rainbow at top of bar
   ctx.fillText('🌈', barX + barW/2, barY + barH + 18);
 
-  // Percentage
   ctx.fillStyle = '#fff';
   ctx.font = `bold ${Math.min(12, W*0.024)}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.fillText(`${Math.floor(progress*100)}%`, barX + barW/2, barY + barH + 32);
 
-  // Touch indicators (subtle)
+  // Touch indicators
   if (gameState === 'playing') {
     ctx.globalAlpha = 0.08;
     ctx.fillStyle = '#fff';
@@ -789,11 +1324,20 @@ function drawHUD() {
     ctx.fillText('▶', W*0.88, H*0.5);
     ctx.globalAlpha = 1;
   }
+
+  // Floating texts
+  floatingTexts.forEach(ft => {
+    ctx.globalAlpha = ft.life;
+    ctx.fillStyle = ft.color;
+    ctx.font = `bold ${Math.min(18, W*0.035)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(ft.text, ft.x, ft.y);
+  });
+  ctx.globalAlpha = 1;
 }
 
 // --- Draw Title ---
 function drawTitle() {
-  // Background
   const grad = ctx.createLinearGradient(0, 0, 0, H);
   grad.addColorStop(0, '#1a0a2e'); grad.addColorStop(1, '#2d1050');
   ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
@@ -801,37 +1345,19 @@ function drawTitle() {
   const t = titleTime;
   ctx.textAlign = 'center';
 
-  // --- Layout: calculate all heights first, then center vertically ---
-  const titleSize = Math.min(28, W*0.05);
-  const instrSize = Math.min(14, W*0.028);
-  const instrSpacing = Math.min(22, H*0.032);
-  const btnH = Math.min(50, H*0.065);
-  const pickLabelH = 20;
-  const gap1 = 35; // after unicorn+title
-  const gap2 = 18; // after instructions
-  const gap3 = 24; // after "pick difficulty" label
-  const gap4 = 20; // after buttons before leaderboard
+  const titleSize = Math.min(26, W*0.045);
+  const instrSize = Math.min(13, W*0.026);
+  const instrSpacing = Math.min(20, H*0.028);
+  const btnH = Math.min(46, H*0.058);
 
-  const instructions = [
-    { icon: '👆', text: 'Drag to move! Collect rainbows!', color: '#4dc9ff' },
-    { icon: '🌈', text: 'Gold=100  Big=50  Small=10', color: '#ffd700' },
-    { icon: '🏆', text: 'Same track for all — compete!', color: '#4dff88' },
-  ];
-
-  // Total content height
-  const unicornTitleH = 50 + titleSize + 5; // emoji + title
-  const instrBlockH = instructions.length * instrSpacing;
-  const totalH = unicornTitleH + gap1 + instrBlockH + gap2 + pickLabelH + gap3 + btnH + gap4 + 120; // 120 for leaderboard
-  const topY = Math.max(20, (H - totalH) / 2);
-
-  let y = topY;
+  let y = Math.max(10, H * 0.02);
 
   // Unicorn emoji
-  ctx.font = `${40+Math.sin(t*2)*3}px sans-serif`;
-  ctx.fillText('🦄', W/2, y + 30);
-  y += 45;
+  ctx.font = `${36+Math.sin(t*2)*3}px sans-serif`;
+  ctx.fillText('🦄', W/2, y + 28);
+  y += 38;
 
-  // Title rainbow letters
+  // Title
   const title = 'Eating Unicorn Rainbows';
   ctx.font = `bold ${titleSize}px sans-serif`;
   const colors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
@@ -843,11 +1369,16 @@ function drawTitle() {
     const yOff = Math.sin(t*3+i*0.3)*3;
     ctx.fillText(title[i], startX+ctx.measureText(title.substring(0,i)).width+charW/2, y+titleSize+yOff);
   }
-  y += titleSize + gap1;
+  y += titleSize + 20;
 
   // Instructions
+  const instructions = [
+    { icon: '👆', text: 'Drag to move! Collect rainbows!', color: '#4dc9ff' },
+    { icon: '⚡', text: 'Dodge clouds & stars — they slow you!', color: '#ff6b9d' },
+    { icon: '🔥', text: 'Chain combos for multipliers!', color: '#ffd700' },
+  ];
   instructions.forEach((inst, i) => {
-    const fadeStart = 0.3 + i*0.4;
+    const fadeStart = 0.3 + i*0.3;
     const alpha = Math.min(1, Math.max(0, (t-fadeStart)*2));
     ctx.globalAlpha = alpha;
     ctx.font = `bold ${instrSize}px sans-serif`;
@@ -855,17 +1386,74 @@ function drawTitle() {
     ctx.fillText(`${inst.icon} ${inst.text}`, W/2, y + i*instrSpacing);
   });
   ctx.globalAlpha = 1;
-  y += instrBlockH + gap2;
+  y += instructions.length * instrSpacing + 12;
 
-  // "Pick your difficulty" label
+  // Skin selector
   ctx.fillStyle = '#c9a0ff';
-  ctx.font = `bold ${Math.min(14,W*0.028)}px sans-serif`;
-  ctx.fillText('🌟 Pick your difficulty! 🌟', W/2, y);
-  y += gap3;
+  ctx.font = `bold ${Math.min(12, W*0.024)}px sans-serif`;
+  ctx.fillText('🦄 Select Unicorn Skin', W/2, y);
+  y += 8;
+
+  const skinSize = Math.min(32, W * 0.06);
+  const skinGap = 6;
+  const totalSkinW = SKINS.length * (skinSize + skinGap) - skinGap;
+  const skinStartX = (W - totalSkinW) / 2;
+  _skinBtns = [];
+
+  SKINS.forEach((skin, i) => {
+    const sx = skinStartX + i * (skinSize + skinGap);
+    const sy = y;
+    _skinBtns.push({ x: sx, y: sy, w: skinSize, h: skinSize, skin });
+
+    const unlocked = isSkinUnlocked(skin);
+    const selected = selectedSkin === skin.id;
+
+    if (selected) {
+      ctx.strokeStyle = '#ffd700'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(sx + skinSize/2, sy + skinSize/2, skinSize/2 + 2, 0, Math.PI*2); ctx.stroke();
+    }
+
+    if (unlocked) {
+      let color = skin.bodyColor;
+      if (color === 'rainbow') {
+        const hue = (Date.now()/10 + i*60) % 360;
+        color = `hsl(${hue}, 100%, 80%)`;
+      }
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(sx + skinSize/2, sy + skinSize/2, skinSize/2 - 2, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = skin.strokeColor; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(sx + skinSize/2, sy + skinSize/2, skinSize/2 - 2, 0, Math.PI*2); ctx.stroke();
+    } else {
+      ctx.fillStyle = '#333';
+      ctx.beginPath(); ctx.arc(sx + skinSize/2, sy + skinSize/2, skinSize/2 - 2, 0, Math.PI*2); ctx.fill();
+      ctx.font = `${skinSize*0.4}px sans-serif`;
+      ctx.fillStyle = '#666';
+      ctx.fillText('🔒', sx + skinSize/2, sy + skinSize/2 + skinSize*0.15);
+    }
+  });
+  y += skinSize + 4;
+
+  // Progress toward next unlock
+  const nextSkin = SKINS.find(s => !isSkinUnlocked(s));
+  if (nextSkin) {
+    ctx.fillStyle = '#888';
+    ctx.font = `${Math.min(10, W*0.02)}px sans-serif`;
+    ctx.fillText(`Total: ${cumulativeScore} pts — Next: ${nextSkin.name} at ${nextSkin.threshold}`, W/2, y + 10);
+  } else {
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `${Math.min(10, W*0.02)}px sans-serif`;
+    ctx.fillText(`All skins unlocked! Total: ${cumulativeScore} pts ⭐`, W/2, y + 10);
+  }
+  y += 22;
 
   // Difficulty buttons
+  ctx.fillStyle = '#c9a0ff';
+  ctx.font = `bold ${Math.min(13,W*0.026)}px sans-serif`;
+  ctx.fillText('🌟 Pick your difficulty! 🌟', W/2, y);
+  y += 16;
+
   const btnY = y;
-  const btnGap = 8;
+  const btnGap = 6;
   const totalBtnW = Math.min(W*0.92, 520);
   const singleBtnW = (totalBtnW - btnGap*(DIFFICULTY_ORDER.length-1)) / DIFFICULTY_ORDER.length;
   const btnStartX = (W - totalBtnW) / 2;
@@ -877,90 +1465,96 @@ function drawTitle() {
     const by = btnY;
     _diffBtns.push({ x: bx, y: by, w: singleBtnW, h: btnH, key });
 
-    // Button bg
     if (key === 'crazy') {
-      // Rainbow flashing
       const hue = (Date.now()/10 + idx*60) % 360;
       ctx.fillStyle = `hsl(${hue}, 100%, 50%)`;
     } else {
       ctx.fillStyle = d.bg;
     }
     ctx.shadowColor = d.color; ctx.shadowBlur = 8;
-    ctx.beginPath(); ctx.roundRect(bx, by, singleBtnW, btnH, 12); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(bx, by, singleBtnW, btnH, 10); ctx.fill();
     ctx.shadowBlur = 0;
 
-    // Border if selected
     if (key === currentDifficulty) {
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.roundRect(bx, by, singleBtnW, btnH, 12); ctx.stroke();
+      ctx.beginPath(); ctx.roundRect(bx, by, singleBtnW, btnH, 10); ctx.stroke();
     }
 
-    // Label
     ctx.fillStyle = '#fff';
-    const labelSize = Math.min(11, singleBtnW*0.22);
+    const labelSize = Math.min(10, singleBtnW*0.2);
     ctx.font = `bold ${labelSize}px sans-serif`;
     ctx.fillText(d.emoji, bx+singleBtnW/2, by+btnH*0.38);
-    ctx.font = `bold ${Math.max(8, labelSize-1)}px sans-serif`;
+    ctx.font = `bold ${Math.max(7, labelSize-1)}px sans-serif`;
     ctx.fillText(d.label, bx+singleBtnW/2, by+btnH*0.72);
   });
 
-  // START button
-  const startBtnW = Math.min(200, W*0.5);
-  const startBtnH = Math.min(50, H*0.065);
-  const startBtnX = (W - startBtnW) / 2;
-  const startBtnY = btnY + btnH + 18;
+  // START + Daily buttons side by side
+  const startBtnW = Math.min(160, W*0.38);
+  const dailyBtnW = Math.min(160, W*0.38);
+  const btnRowW = startBtnW + 10 + dailyBtnW;
+  const startBtnH = Math.min(46, H*0.058);
+  const startBtnX = (W - btnRowW) / 2;
+  const startBtnY = btnY + btnH + 14;
   _startBtn = { x: startBtnX, y: startBtnY, w: startBtnW, h: startBtnH };
 
-  // Pulsing glow
   const pulse = 0.8 + Math.sin(t*3)*0.2;
   ctx.shadowColor = '#4dff88'; ctx.shadowBlur = 15 * pulse;
   const startGrad = ctx.createLinearGradient(startBtnX, startBtnY, startBtnX+startBtnW, startBtnY);
-  startGrad.addColorStop(0, '#4dff88');
-  startGrad.addColorStop(1, '#00cc66');
+  startGrad.addColorStop(0, '#4dff88'); startGrad.addColorStop(1, '#00cc66');
   ctx.fillStyle = startGrad;
   ctx.beginPath(); ctx.roundRect(startBtnX, startBtnY, startBtnW, startBtnH, startBtnH/2); ctx.fill();
   ctx.shadowBlur = 0;
   ctx.fillStyle = '#fff';
-  ctx.font = `bold ${Math.min(22, W*0.04)}px sans-serif`;
-  ctx.fillText('🏁 START! 🏁', W/2, startBtnY + startBtnH*0.65);
+  ctx.font = `bold ${Math.min(18, W*0.035)}px sans-serif`;
+  ctx.fillText('🏁 START!', startBtnX + startBtnW/2, startBtnY + startBtnH*0.65);
+
+  // Daily Challenge button
+  const dailyBtnX = startBtnX + startBtnW + 10;
+  _dailyBtn = { x: dailyBtnX, y: startBtnY, w: dailyBtnW, h: startBtnH };
+
+  ctx.shadowColor = '#ff9e4d'; ctx.shadowBlur = 12 * pulse;
+  const dailyGrad = ctx.createLinearGradient(dailyBtnX, startBtnY, dailyBtnX+dailyBtnW, startBtnY);
+  dailyGrad.addColorStop(0, '#ff9e4d'); dailyGrad.addColorStop(1, '#ff6b35');
+  ctx.fillStyle = dailyGrad;
+  ctx.beginPath(); ctx.roundRect(dailyBtnX, startBtnY, dailyBtnW, startBtnH, startBtnH/2); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.min(15, W*0.03)}px sans-serif`;
+  ctx.fillText('📅 DAILY', dailyBtnX + dailyBtnW/2, startBtnY + startBtnH*0.65);
 
   // Leaderboard
-  _lbTabBtns = [];
-  const scoresLbY = startBtnY + startBtnH + gap4;
+  const scoresLbY = startBtnY + startBtnH + 16;
   const lbScores = leaderboards[selectedDifficultyForLB] || [];
   if (lbScores.length > 0) {
     ctx.fillStyle = '#ffd700';
-    ctx.font = `bold ${Math.min(15,W*0.03)}px sans-serif`;
+    ctx.font = `bold ${Math.min(14,W*0.028)}px sans-serif`;
     ctx.fillText(`🏆 ${DIFFICULTIES[selectedDifficultyForLB].label} Top 10 🏆`, W/2, scoresLbY);
-    const lbSize = Math.min(12, W*0.024);
+    const lbSize = Math.min(11, W*0.022);
     ctx.font = `${lbSize}px sans-serif`;
     lbScores.slice(0,10).forEach((s,i) => {
       const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'⭐';
       ctx.fillStyle = i<3?'#ffd700':'#ccc';
-      ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, scoresLbY+16+i*(lbSize+4));
+      ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, scoresLbY+14+i*(lbSize+3));
     });
   } else {
     ctx.fillStyle = '#888';
-    ctx.font = `${Math.min(13,W*0.026)}px sans-serif`;
+    ctx.font = `${Math.min(12,W*0.024)}px sans-serif`;
     ctx.fillText('No scores yet — be the first! 🌟', W/2, scoresLbY + 10);
   }
 }
 
 // --- Draw Win Screen ---
 function drawWinScreen() {
-  // Background
   const grad = ctx.createLinearGradient(0, 0, 0, H);
   grad.addColorStop(0, '#1a0a2e'); grad.addColorStop(1, '#2d1050');
   ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
 
-  // Fireworks
   fireworks.forEach(f => {
     ctx.globalAlpha = f.life; ctx.fillStyle = f.color;
     ctx.beginPath(); ctx.arc(f.x, f.y, f.size, 0, Math.PI*2); ctx.fill();
   });
   ctx.globalAlpha = 1;
 
-  // Particles
   particles.forEach(p => {
     ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
     if (p.type==='star') drawStar(p.x,p.y,p.size,4,p.color);
@@ -971,7 +1565,6 @@ function drawWinScreen() {
   ctx.textAlign = 'center';
 
   if (showingNameEntry) {
-    // Name entry
     ctx.fillStyle = '#ffd700';
     ctx.font = `bold ${Math.min(28,W*0.05)}px sans-serif`;
     ctx.fillText('⭐ TOP 10 SCORE! ⭐', W/2, H*0.10);
@@ -984,7 +1577,6 @@ function drawWinScreen() {
     ctx.font = `bold ${Math.min(22,W*0.04)}px sans-serif`;
     ctx.fillText("What's your name? 🦄", W/2, H*0.24);
 
-    // Input box
     const boxW = Math.min(280,W*0.7), boxH = 50;
     const boxX = (W-boxW)/2, boxY = H*0.27;
     ctx.shadowColor = '#ff6b9d'; ctx.shadowBlur = 15;
@@ -995,7 +1587,6 @@ function drawWinScreen() {
     ctx.font = `bold ${Math.min(26,W*0.045)}px sans-serif`;
     ctx.fillText(nameInput ? nameInput : 'Type your name!', W/2, boxY+boxH/2+9);
 
-    // Keyboard
     const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const btnSize = Math.min(34, Math.floor((W-30)/10));
     const btnPad = 3;
@@ -1028,7 +1619,6 @@ function drawWinScreen() {
 
     window._nameKB = { letters, btnSize, btnPad, rowLen, kbStartX, kbStartY, ctrlY, ctrlBtnW };
   } else {
-    // Win screen
     const bounce = Math.abs(Math.sin(winTime*5))*20;
     ctx.font = `${60+Math.sin(winTime*3)*8}px sans-serif`;
     ctx.fillText('🦄', W/2, H*0.18-bounce);
@@ -1051,40 +1641,43 @@ function drawWinScreen() {
     ctx.font = `${Math.min(22,W*0.04)}px sans-serif`;
     ctx.fillText(`You collected ${score} rainbow points! ✨`, W/2, H*0.41);
 
-    // Check if NOT in top 10
+    // Show cumulative + unlocks
+    ctx.fillStyle = '#c9a0ff';
+    ctx.font = `${Math.min(14,W*0.028)}px sans-serif`;
+    ctx.fillText(`Lifetime total: ${cumulativeScore} pts`, W/2, H*0.46);
+
     const minTop10 = leaderboard.length >= 10 ? leaderboard[leaderboard.length-1].score : 0;
     if (window._nameSubmitted || (score <= minTop10 && leaderboard.length >= 10)) {
       if (!window._nameSubmitted && score <= minTop10) {
         ctx.fillStyle = '#c9a0ff';
-        ctx.font = `${Math.min(18,W*0.033)}px sans-serif`;
-        ctx.fillText(`Great run! Top 10 starts at ${minTop10} points — keep trying! 🌟`, W/2, H*0.48);
+        ctx.font = `${Math.min(16,W*0.03)}px sans-serif`;
+        ctx.fillText(`Top 10 starts at ${minTop10} — keep trying! 🌟`, W/2, H*0.50);
       }
     }
 
-    // Leaderboard
     const allScores = leaderboard;
     if (allScores.length > 0) {
       ctx.fillStyle = '#ffd700';
       ctx.font = `bold ${Math.min(16,W*0.032)}px sans-serif`;
-      ctx.fillText('🏆 Top 10 🏆', W/2, H*0.54);
+      ctx.fillText('🏆 Top 10 🏆', W/2, H*0.56);
       const lbS = Math.min(13,W*0.026);
       ctx.font = `${lbS}px sans-serif`;
       allScores.slice(0,10).forEach((s,i) => {
         const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'⭐';
         ctx.fillStyle = i<3?'#ffd700':'#ccc';
-        ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, H*0.54+18+i*(lbS+5));
+        ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, H*0.56+18+i*(lbS+5));
       });
     }
 
     ctx.font = '26px sans-serif';
-    ctx.fillText('🎉 🦄 🌈 ⭐ 💖 🎉', W/2, H*0.85);
+    ctx.fillText('🎉 🦄 🌈 ⭐ 💖 🎉', W/2, H*0.87);
 
     if (winTime > 2) {
-      const pulse = 0.7+Math.sin(winTime*3)*0.3;
-      ctx.globalAlpha = pulse;
+      const pulse2 = 0.7+Math.sin(winTime*3)*0.3;
+      ctx.globalAlpha = pulse2;
       ctx.fillStyle = '#ffd700';
       ctx.font = `bold ${Math.min(22,W*0.04)}px sans-serif`;
-      ctx.fillText('🌟 Tap to Race Again! 🌟', W/2, H*0.92);
+      ctx.fillText('🌟 Tap to Race Again! 🌟', W/2, H*0.93);
       ctx.globalAlpha = 1;
     }
   }
@@ -1097,16 +1690,21 @@ function draw() {
   if (gameState === 'title') { drawTitle(); return; }
   if (gameState === 'win') { drawWinScreen(); return; }
 
-  // --- Playing ---
+  // Screen shake
+  ctx.save();
+  if (shakeAmount > 0.5) {
+    ctx.translate((Math.random()-0.5)*shakeAmount, (Math.random()-0.5)*shakeAmount);
+  }
+
   drawPlayBackground();
 
-  // Rainbow trail behind unicorn
+  // Rainbow trail
   const trailColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
   if (unicorn.trail.length > 1) {
     unicorn.trail.forEach((t, i) => {
       if (i===0) return;
       ctx.globalAlpha = t.life * 0.4;
-      ctx.strokeStyle = trailColors[i%trailColors.length];
+      ctx.strokeStyle = t.color || trailColors[i%trailColors.length];
       ctx.lineWidth = t.life * 5;
       ctx.lineCap = 'round';
       ctx.beginPath();
@@ -1117,8 +1715,10 @@ function draw() {
     ctx.globalAlpha = 1;
   }
 
-  // Draw rainbows on screen
+  // Draw items on screen
   const viewRange = 600;
+
+  // Rainbows
   trackRainbows.forEach((rb, i) => {
     if (collectedSet.has(i)) return;
     const relY = (rb.y - distance) / viewRange;
@@ -1132,9 +1732,29 @@ function draw() {
     drawRainbow(screenX, screenY + bob, rb.type);
   });
 
-  // Draw finish rainbow — positioned so its base is at the unicorn Y when distance hits TRACK_LENGTH
+  // Obstacles
+  trackObstacles.forEach((obs, i) => {
+    if (collectedObstacles.has(i)) return;
+    const relY = (obs.y - distance) / viewRange;
+    if (relY < -0.05 || relY > 1.05) return;
+    const screenY = H * (1 - relY * 0.85 - 0.08);
+    const screenX = obs.x * W;
+    drawObstacle(screenX, screenY, obs);
+  });
+
+  // Power-ups
+  trackPowerUps.forEach((pu, i) => {
+    if (collectedPowerUps.has(i)) return;
+    const relY = (pu.y - distance) / viewRange;
+    if (relY < -0.05 || relY > 1.05) return;
+    const screenY = H * (1 - relY * 0.85 - 0.08);
+    const screenX = pu.x * W;
+    const bob = Math.sin(Date.now()/300 + i*2) * 6;
+    drawPowerUpItem(screenX, screenY + bob, pu);
+  });
+
+  // Finish rainbow
   const finishRelY = (TRACK_LENGTH - distance) / viewRange;
-  // Base of rainbow should land at unicorn position (H*0.72) when finishRelY=0
   const finishBaseY = H * 0.72 - finishRelY * H * 0.85;
   if (finishBaseY > -W*0.5 && finishBaseY < H + 50) {
     drawFinishRainbow(finishBaseY);
@@ -1152,6 +1772,8 @@ function draw() {
     else { ctx.beginPath(); ctx.arc(p.x,p.y,p.size,0,Math.PI*2); ctx.fill(); }
   });
   ctx.globalAlpha = 1;
+
+  ctx.restore(); // end screen shake
 
   drawHUD();
 }
