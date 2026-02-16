@@ -242,18 +242,14 @@ function update(dt) {
   timer -= dt;
   if (timer <= 0) {
     timer = 0;
-    if (energy >= WIN_ENERGY) {
-      gameState = 'win'; winTime = 0;
-      playWinFanfare();
-      for (let i=0;i<10;i++) spawnFirework(Math.random()*W, Math.random()*H*0.5);
-    } else {
-      gameState = 'lose'; winTime = 0;
-      playChime(330, 0.5, 0.1); playChime(262, 0.5, 0.08);
-    }
+    // Always win! She's 6 — every run is a celebration 🎉
+    gameState = 'win'; winTime = 0;
+    playWinFanfare();
+    for (let i=0;i<10;i++) spawnFirework(Math.random()*W, Math.random()*H*0.5);
     return;
   }
 
-  // Check if energy full
+  // Early win if energy bar is completely full
   if (energy >= WIN_ENERGY) {
     gameState = 'win'; winTime = 0;
     playWinFanfare();
@@ -769,9 +765,10 @@ function drawHUD() {
   // Combo
   if (combo > 1) {
     ctx.fillStyle = '#ff6b9d';
-    ctx.font = `bold ${18+combo*2}px sans-serif`;
+    const comboSize = Math.min(18+combo*2, 36); // cap font size
+    ctx.font = `bold ${comboSize}px sans-serif`;
     ctx.textAlign = 'right';
-    ctx.fillText(`${combo}x COMBO! 🔥`, W-15, 30);
+    ctx.fillText(`${combo}x COMBO! 🔥`, W-15, 75);
   }
 }
 
@@ -884,8 +881,8 @@ function drawEndScreen() {
 
     ctx.fillStyle = '#fff';
     ctx.font = `${Math.min(24, W*0.04)}px sans-serif`;
-    ctx.fillText(`Score: ${score} ✨`, W/2, H*0.58);
-    ctx.fillText('The rainbow is SO proud of you!', W/2, H*0.65);
+    ctx.fillText(`You ate ${score} rainbow points! ✨`, W/2, H*0.58);
+    ctx.fillText('The Big Rainbow is SO proud of you!', W/2, H*0.65);
     ctx.font = '30px sans-serif';
     ctx.fillText('🎉 🦄 🌈 ⭐ 💖 🎉', W/2, H*0.74);
   } else {
