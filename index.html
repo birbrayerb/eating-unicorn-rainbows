@@ -80,6 +80,41 @@ function startMelody() {
 
 function stopMelody() { clearInterval(melodyInterval); melodyInterval = null; }
 
+// --- Leaderboard ---
+let leaderboard = [];
+let personalBests = JSON.parse(localStorage.getItem('unicorn_bests') || '[]');
+let showingNameEntry = false;
+let pendingScore = 0;
+let nameInput = '';
+let nameInputCursor = 0;
+
+async function fetchLeaderboard() {
+  try {
+    const r = await fetch('/api/scores');
+    const d = await r.json();
+    if (d.scores) leaderboard = d.scores;
+  } catch(e) { console.log('Leaderboard offline, using local only'); }
+}
+
+async function submitScore(name, sc) {
+  // Save locally
+  personalBests.push({ name, score: sc, date: `${new Date().getMonth()+1}/${new Date().getDate()}` });
+  personalBests.sort((a,b) => b.score - a.score);
+  personalBests = personalBests.slice(0, 10);
+  localStorage.setItem('unicorn_bests', JSON.stringify(personalBests));
+  // Submit globally
+  try {
+    const r = await fetch('/api/scores', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, score: sc })
+    });
+    const d = await r.json();
+    if (d.scores) leaderboard = d.scores;
+  } catch(e) { console.log('Could not submit score'); }
+}
+
+fetchLeaderboard();
+
 // --- Game State ---
 let gameState = 'title'; // title, playing, win, lose
 const GAME_DURATION = 120; // 2 minutes (more fun than 10 for kids)
@@ -882,7 +917,7 @@ function drawEndScreen() {
     ctx.fillStyle = '#fff';
     ctx.font = `${Math.min(24, W*0.04)}px sans-serif`;
     ctx.fillText(`You ate ${score} rainbow points! ✨`, W/2, H*0.58);
-    ctx.fillText('The Big Rainbow is SO proud of you!', W/2, H*0.65);
+    ctx.fillText('You are a Rainbow Champion! 👑', W/2, H*0.65);
     ctx.font = '30px sans-serif';
     ctx.fillText('🎉 🦄 🌈 ⭐ 💖 🎉', W/2, H*0.74);
   } else {
@@ -896,7 +931,7 @@ function drawEndScreen() {
     ctx.font = `bold ${Math.min(32, W*0.06)}px sans-serif`;
     ctx.fillText('Almost there!', W/2, H*0.52);
     ctx.font = `${Math.min(22, W*0.04)}px sans-serif`;
-    ctx.fillText('The rainbow believes in you! 🌈', W/2, H*0.60);
+    ctx.fillText('You are a unicorn superstar! 🌟', W/2, H*0.60);
     ctx.fillText(`You collected ${Math.floor(energy)}/${WIN_ENERGY} rainbow energy!`, W/2, H*0.67);
     ctx.fillStyle = '#ffd700';
     ctx.font = `bold ${Math.min(20, W*0.035)}px sans-serif`;
