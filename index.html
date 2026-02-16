@@ -14,7 +14,7 @@ canvas { display:block; width:100%; height:100%; }
 <canvas id="c"></canvas>
 <script>
 // ============================================================
-// 🦄 EATING UNICORN RAINBOWS — Ultimate Edition 🌈
+// 🦄 EATING UNICORN RAINBOWS — Ultimate Edition v2 🌈
 // ============================================================
 
 const canvas = document.getElementById('c');
@@ -74,6 +74,29 @@ function playWinFanfare() {
   notes.forEach((f,i) => setTimeout(() => playChime(f, 0.4, 0.12, i%2?'sine':'triangle'), i*150));
 }
 
+function playNearMiss() {
+  playChime(900, 0.1, 0.08, 'sine');
+  setTimeout(() => playChime(1200, 0.08, 0.06, 'sine'), 40);
+}
+
+function playRainbowBurst() {
+  const notes = [523, 659, 784, 988, 1175, 1397, 1568, 1760];
+  notes.forEach((f,i) => setTimeout(() => playChime(f, 0.25, 0.1, 'triangle'), i*50));
+}
+
+function playCoinSound() {
+  playChime(1200, 0.1, 0.1, 'sine');
+  setTimeout(() => playChime(1600, 0.15, 0.08, 'sine'), 60);
+}
+
+function playLevelUp() {
+  [440,554,659,880].forEach((f,i) => setTimeout(() => playChime(f, 0.2, 0.1, 'triangle'), i*80));
+}
+
+function playMissionComplete() {
+  [660,880,1100,1320,1100,1320,1568].forEach((f,i) => setTimeout(() => playChime(f, 0.2, 0.08, 'triangle'), i*70));
+}
+
 let melodyInterval;
 function startMelody() {
   if (melodyInterval) return;
@@ -97,10 +120,19 @@ function seededRandom(seed) {
 }
 
 // --- Curving Lane ---
-function getLaneCenterOffset(trackY) {
-  // Returns offset in 0-1 range (centered at 0.5)
-  return Math.sin(trackY * 0.0008) * 0.15 + Math.sin(trackY * 0.0003 + 2.5) * 0.1;
+function getLaneCenterOffset(trackY, aggressiveness) {
+  const a = aggressiveness || 1;
+  return Math.sin(trackY * 0.0008) * 0.15 * a + Math.sin(trackY * 0.0003 + 2.5) * 0.1 * a;
 }
+
+// --- Track Lengths per Difficulty ---
+const TRACK_LENGTHS = {
+  easy: 10000,
+  medium: 13000,
+  hard: 16000,
+  extreme: 20000,
+  crazy: 26000,
+};
 
 // --- Difficulty Levels ---
 const DIFFICULTIES = {
@@ -113,6 +145,9 @@ const DIFFICULTIES = {
 const DIFFICULTY_ORDER = ['easy','medium','hard','extreme','crazy'];
 let currentDifficulty = 'easy';
 let selectedDifficultyForLB = 'easy';
+
+// --- Game Mode ---
+let gameMode = 'race'; // 'race' or 'endless'
 
 // --- Skins System ---
 const SKINS = [
@@ -135,36 +170,135 @@ let selectedSkin = loadSelectedSkin();
 function getSkin() { return SKINS.find(s => s.id === selectedSkin) || SKINS[0]; }
 function isSkinUnlocked(skin) { return cumulativeScore >= skin.threshold; }
 
+// --- Coins System ---
+function loadCoins() { return parseInt(localStorage.getItem('unicorn_coins') || '0'); }
+function saveCoins(c) { localStorage.setItem('unicorn_coins', String(c)); }
+let coinBalance = loadCoins();
+
+// Shop items (one-time use per run)
+let shopItems = [
+  { id: 'headstart', name: 'Head Start', icon: '🚀', desc: 'Start 10% further', price: 50 },
+  { id: 'magnet', name: 'Coin Magnet', icon: '🧲', desc: 'Start with magnet', price: 75 },
+  { id: 'extralife', name: 'Extra Life', icon: '❤️', desc: '4th life (endless)', price: 100 },
+  { id: 'scoreboost', name: 'Score Boost', icon: '⭐', desc: '1.5x score multiplier', price: 60 },
+];
+function loadPurchasedItems() {
+  try { return JSON.parse(localStorage.getItem('unicorn_purchased_items') || '[]'); } catch(e) { return []; }
+}
+function savePurchasedItems(items) { localStorage.setItem('unicorn_purchased_items', JSON.stringify(items)); }
+let purchasedItems = loadPurchasedItems();
+
+// Active boosts for current run
+let activeBoosts = {};
+
+// --- Missions System ---
+const MISSION_TEMPLATES = [
+  { type: 'gold_rainbows', desc: 'Collect {X} gold rainbows in one run', targets: [3, 5, 8], stat: 'goldRainbows' },
+  { type: 'combo', desc: 'Get a {X}x combo', targets: [10, 15, 20], stat: 'maxCombo' },
+  { type: 'no_clouds', desc: 'Finish a race without hitting clouds', targets: [1], stat: 'noCloudHit' },
+  { type: 'total_rainbows', desc: 'Collect {X} rainbows in one run', targets: [30, 50, 75], stat: 'totalRainbows' },
+  { type: 'powerups', desc: 'Use {X} power-ups in one run', targets: [3, 5], stat: 'powerupsUsed' },
+  { type: 'endless_distance', desc: 'Travel {X} in endless mode', targets: [5000, 10000, 20000], stat: 'endlessDistance' },
+  { type: 'rainbow_bursts', desc: 'Trigger {X} Rainbow Bursts', targets: [1, 2, 3], stat: 'rainbowBursts' },
+];
+
+function loadMissions() {
+  try { 
+    const m = JSON.parse(localStorage.getItem('unicorn_missions') || 'null');
+    if (m && m.length === 3) return m;
+    return null;
+  } catch(e) { return null; }
+}
+function saveMissions(m) { localStorage.setItem('unicorn_missions', JSON.stringify(m)); }
+
+function generateMission() {
+  const tmpl = MISSION_TEMPLATES[Math.floor(Math.random() * MISSION_TEMPLATES.length)];
+  const target = tmpl.targets[Math.floor(Math.random() * tmpl.targets.length)];
+  return {
+    type: tmpl.type,
+    desc: tmpl.desc.replace('{X}', target),
+    target: target,
+    stat: tmpl.stat,
+    completed: false,
+  };
+}
+
+let missions = loadMissions() || [generateMission(), generateMission(), generateMission()];
+saveMissions(missions);
+
+// Run stats for missions
+let runStats = {};
+function resetRunStats() {
+  runStats = {
+    goldRainbows: 0,
+    maxCombo: 0,
+    noCloudHit: true,
+    totalRainbows: 0,
+    powerupsUsed: 0,
+    endlessDistance: 0,
+    rainbowBursts: 0,
+  };
+}
+
+let missionCompleteQueue = []; // messages to show
+
+// --- Ghost System ---
+function loadGhostData(diff) {
+  try { return JSON.parse(localStorage.getItem(`unicorn_ghost_${diff}`) || 'null'); } catch(e) { return null; }
+}
+function saveGhostData(diff, data) { localStorage.setItem(`unicorn_ghost_${diff}`, JSON.stringify(data)); }
+
+let ghostData = null; // loaded ghost for current difficulty
+let currentRunPositions = []; // recording current run positions
+let ghostVisible = true;
+
 // --- Track Generation ---
-const TRACK_LENGTH = 10000;
 let trackRainbows = [];
 let trackObstacles = [];
 let trackPowerUps = [];
+let trackCoins = [];
 let trackStars = [];
 let trackSeed = 0;
 let isDailyChallenge = false;
+let currentTrackLength = 10000;
 
 function getDailySeed() {
   const d = new Date();
   return d.getFullYear() * 10000 + (d.getMonth()+1) * 100 + d.getDate();
 }
 
+function getTrackLength() {
+  if (gameMode === 'endless') return Infinity;
+  return TRACK_LENGTHS[currentDifficulty] || 10000;
+}
+
 function generateTrack(seed) {
   const diff = DIFFICULTIES[currentDifficulty];
+  currentTrackLength = getTrackLength();
+  const TL = gameMode === 'endless' ? 10000 : currentTrackLength; // initial generation length for race
   trackSeed = seed !== undefined ? seed : (diff.seed ^ (Date.now() & 0xFFFFFF));
   const rng = seededRandom(trackSeed);
   
   trackRainbows = [];
   trackObstacles = [];
   trackPowerUps = [];
+  trackCoins = [];
   trackStars = [];
 
-  // Rainbows
-  for (let y = 200; y < TRACK_LENGTH - 200; y += diff.spacing) {
+  if (gameMode === 'endless') {
+    // Generate initial chunk
+    endlessGenerated = 0;
+    generateEndlessChunk(0, 3000, rng);
+    endlessRng = rng;
+    endlessGenerated = 3000;
+    return;
+  }
+
+  // Race mode track generation
+  for (let y = 200; y < TL - 200; y += diff.spacing) {
     const r = rng();
     const laneOffset = getLaneCenterOffset(y);
     const baseX = 0.5 + laneOffset;
-    // Cluster around the curving lane center
     const spread = 0.25;
     const x = baseX + (rng() - 0.5) * spread * 2;
     const clampedX = Math.max(0.08, Math.min(0.92, x));
@@ -178,11 +312,20 @@ function generateTrack(seed) {
     }
   }
 
-  // Obstacles — start sparse, get denser
-  for (let y = 400; y < TRACK_LENGTH - 300; y += Math.max(40, 120 - (y / TRACK_LENGTH) * 80)) {
+  // Coins (rarer than rainbows)
+  for (let y = 300; y < TL - 300; y += 200 + rng() * 300) {
+    if (rng() < 0.3) {
+      const laneOffset = getLaneCenterOffset(y);
+      const baseX = 0.5 + laneOffset;
+      const x = Math.max(0.08, Math.min(0.92, baseX + (rng() - 0.5) * 0.4));
+      trackCoins.push({ y, x, swayOffset: rng()*Math.PI*2 });
+    }
+  }
+
+  for (let y = 400; y < TL - 300; y += Math.max(40, 120 - (y / TL) * 80)) {
     const r = rng();
-    const progress = y / TRACK_LENGTH;
-    const spawnChance = 0.15 + progress * 0.35; // 15% at start, 50% at end
+    const progress = y / TL;
+    const spawnChance = 0.15 + progress * 0.35;
     if (r < spawnChance) {
       const laneOffset = getLaneCenterOffset(y);
       const baseX = 0.5 + laneOffset;
@@ -193,12 +336,12 @@ function generateTrack(seed) {
         slowDuration: obstType === 'cloud' ? 2.0 : 1.5,
         swayOffset: rng() * Math.PI * 2,
         rotation: rng() * Math.PI * 2,
+        nearMissTriggered: false,
       });
     }
   }
 
-  // Power-ups — rarer
-  for (let y = 600; y < TRACK_LENGTH - 500; y += 300 + rng() * 200) {
+  for (let y = 600; y < TL - 500; y += 300 + rng() * 200) {
     if (rng() < 0.5) {
       const laneOffset = getLaneCenterOffset(y);
       const baseX = 0.5 + laneOffset;
@@ -209,21 +352,118 @@ function generateTrack(seed) {
     }
   }
 
-  // Background stars
-  for (let y = 0; y < TRACK_LENGTH; y += 30) {
+  for (let y = 0; y < TL; y += 30) {
     if (rng() < 0.3) {
       trackStars.push({ y, x: rng(), size: rng()*2+1, twinkleOffset: rng()*Math.PI*2 });
     }
   }
 }
 
+// --- Endless Mode ---
+let endlessRng = null;
+let endlessGenerated = 0;
+let endlessLives = 3;
+let endlessSpeed = 125;
+let endlessTime = 0;
+let endlessLevelUpTimer = 0;
+let endlessLevelUpFlash = 0;
+let endlessLevel = 1;
+let lostLifeAnim = 0;
+
+function generateEndlessChunk(fromY, toY, rng) {
+  const progress = fromY / 10000; // escalation factor
+  const density = Math.min(2.5, 1 + progress * 0.3);
+  const curveAggr = Math.min(3, 1 + progress * 0.2);
+  
+  // Rainbows
+  const spacing = Math.max(30, 60 - progress * 5);
+  for (let y = fromY; y < toY; y += spacing) {
+    const r = rng();
+    const laneOffset = getLaneCenterOffset(y, curveAggr);
+    const baseX = 0.5 + laneOffset;
+    const x = Math.max(0.08, Math.min(0.92, baseX + (rng() - 0.5) * 0.5));
+    if (r < 0.45) {
+      trackRainbows.push({ y, x, type: 'small', points: 10, swayOffset: rng()*Math.PI*2 });
+    } else if (r < 0.58) {
+      trackRainbows.push({ y, x, type: 'big', points: 50, swayOffset: rng()*Math.PI*2 });
+    } else if (r < 0.62) {
+      trackRainbows.push({ y, x, type: 'gold', points: 100, swayOffset: rng()*Math.PI*2 });
+    }
+  }
+
+  // Coins
+  for (let y = fromY; y < toY; y += 200 + rng() * 300) {
+    if (rng() < 0.3) {
+      const laneOffset = getLaneCenterOffset(y, curveAggr);
+      const baseX = 0.5 + laneOffset;
+      const x = Math.max(0.08, Math.min(0.92, baseX + (rng() - 0.5) * 0.4));
+      trackCoins.push({ y, x, swayOffset: rng()*Math.PI*2 });
+    }
+  }
+
+  // Obstacles — denser over time
+  const obstSpacing = Math.max(25, 100 - progress * 15);
+  for (let y = fromY; y < toY; y += obstSpacing) {
+    const r = rng();
+    const spawnChance = Math.min(0.7, 0.2 + progress * 0.15);
+    if (r < spawnChance) {
+      const laneOffset = getLaneCenterOffset(y, curveAggr);
+      const baseX = 0.5 + laneOffset;
+      const x = Math.max(0.08, Math.min(0.92, baseX + (rng() - 0.5) * 0.5));
+      const obstType = rng() < 0.6 ? 'cloud' : 'star';
+      trackObstacles.push({
+        y, x, type: obstType,
+        slowDuration: obstType === 'cloud' ? 2.0 : 1.5,
+        swayOffset: rng() * Math.PI * 2,
+        rotation: rng() * Math.PI * 2,
+        nearMissTriggered: false,
+      });
+    }
+  }
+
+  // Power-ups
+  for (let y = fromY; y < toY; y += 300 + rng() * 200) {
+    if (rng() < 0.5) {
+      const laneOffset = getLaneCenterOffset(y, curveAggr);
+      const baseX = 0.5 + laneOffset;
+      const x = Math.max(0.1, Math.min(0.9, baseX + (rng() - 0.5) * 0.3));
+      const types = ['magnet', 'shield', 'rocket', 'giant'];
+      const type = types[Math.floor(rng() * types.length)];
+      trackPowerUps.push({ y, x, type, swayOffset: rng() * Math.PI * 2 });
+    }
+  }
+
+  // Stars
+  for (let y = fromY; y < toY; y += 30) {
+    if (rng() < 0.3) {
+      trackStars.push({ y, x: rng(), size: rng()*2+1, twinkleOffset: rng()*Math.PI*2 });
+    }
+  }
+}
+
+function cleanupEndlessEntities() {
+  const cutoff = distance - 1000;
+  trackRainbows = trackRainbows.filter(r => r.y > cutoff);
+  trackObstacles = trackObstacles.filter(o => o.y > cutoff);
+  trackPowerUps = trackPowerUps.filter(p => p.y > cutoff);
+  trackCoins = trackCoins.filter(c => c.y > cutoff);
+  trackStars = trackStars.filter(s => s.y > cutoff);
+}
+
+// --- Rainbow Burst ---
+let rainbowBurstEffect = 0;
+let rainbowBurstRadius = 0;
+let lastBurstCombo = 0;
+
+// --- Near Miss ---
+let nearMissFlash = 0;
+
 // --- Leaderboard ---
 let leaderboard = [];
 let showingNameEntry = false;
 let pendingScore = 0;
 let nameInput = '';
-let leaderboards = { easy:[], medium:[], hard:[], extreme:[], crazy:[] };
-let dailyLeaderboards = { easy:[], medium:[], hard:[], extreme:[], crazy:[] };
+let leaderboards = { easy:[], medium:[], hard:[], extreme:[], crazy:[], endless:[] };
 
 async function fetchLeaderboard(diff) {
   diff = diff || selectedDifficultyForLB;
@@ -236,20 +476,20 @@ async function fetchLeaderboard(diff) {
 
 async function submitScore(name, sc) {
   try {
-    const suffix = isDailyChallenge ? '&daily=true' : '';
+    const diff = gameMode === 'endless' ? 'endless' : currentDifficulty;
     const r = await fetch('/api/scores', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, score: sc, difficulty: currentDifficulty, daily: isDailyChallenge })
+      body: JSON.stringify({ name, score: sc, difficulty: diff, daily: isDailyChallenge })
     });
     const d = await r.json();
-    if (d.scores) { leaderboards[currentDifficulty] = d.scores; leaderboard = d.scores; }
+    if (d.scores) { leaderboards[diff] = d.scores; leaderboard = d.scores; }
   } catch(e) { console.log('Could not submit score'); }
 }
 
 fetchLeaderboard('easy');
 
 // --- Game State ---
-let gameState = 'title'; // title, playing, win
+let gameState = 'title'; // title, playing, win, shop
 let score = 0;
 let distance = 0;
 let titleTime = 0;
@@ -257,10 +497,12 @@ let winTime = 0;
 let collectedSet = new Set();
 let collectedObstacles = new Set();
 let collectedPowerUps = new Set();
+let collectedCoins = new Set();
+let coinsCollectedThisRun = 0;
 
 // Combo system
 let combo = 0;
-let comboTimer = 0; // visual display timer
+let comboTimer = 0;
 let lastComboText = '';
 let comboBreakEffect = 0;
 
@@ -268,7 +510,7 @@ let comboBreakEffect = 0;
 let floatingTexts = [];
 
 // Power-up state
-let activePowerUp = null; // { type, timeLeft }
+let activePowerUp = null;
 
 // Slow effect
 let slowTimer = 0;
@@ -281,34 +523,37 @@ let sprintFlashTimer = 0;
 // Screen shake
 let shakeAmount = 0;
 
+// Title scroll
+let titleScrollY = 0;
+let titleMaxScroll = 0;
+
 // Speed
-function getBaseSpeed() { return DIFFICULTIES[currentDifficulty].speed; }
+function getBaseSpeed() {
+  if (gameMode === 'endless') return endlessSpeed;
+  return DIFFICULTIES[currentDifficulty].speed;
+}
 
 function getCurrentSpeed() {
   const base = getBaseSpeed();
-  const progress = distance / TRACK_LENGTH;
-  // Progressive speed: ramp up 30% over the track
-  let speed = base * (1 + progress * 0.3);
-  // Sprint: last 20%
-  if (progress >= 0.8) {
-    speed *= 1.4;
+  let speed = base;
+  if (gameMode === 'race') {
+    const TL = currentTrackLength;
+    const progress = distance / TL;
+    speed = base * (1 + progress * 0.3);
+    if (progress >= 0.8) speed *= 1.4;
   }
-  // Slow debuff
-  if (slowTimer > 0) {
-    speed *= 0.4;
-  }
-  // Rocket power-up
-  if (activePowerUp && activePowerUp.type === 'rocket') {
-    speed *= 2.0;
-  }
+  if (slowTimer > 0) speed *= 0.4;
+  if (activePowerUp && activePowerUp.type === 'rocket') speed *= 2.0;
   return speed;
 }
 
 function getComboMultiplier() {
-  if (combo >= 10) return 3;
-  if (combo >= 6) return 2;
-  if (combo >= 3) return 1.5;
-  return 1;
+  let mult = 1;
+  if (combo >= 10) mult = 3;
+  else if (combo >= 6) mult = 2;
+  else if (combo >= 3) mult = 1.5;
+  if (activeBoosts.scoreboost) mult *= 1.5;
+  return mult;
 }
 
 // --- Unicorn ---
@@ -317,7 +562,7 @@ const unicorn = {
   trail: [],
   sparkle: 0,
   blinkTimer: 3,
-  scale: 1, // for giant mode
+  scale: 1,
 };
 
 const UNICORN_MOVE_SPEED = 1.8;
@@ -384,6 +629,7 @@ document.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 canvas.addEventListener('pointerdown', e => {
   initAudio();
   if (gameState === 'title') { handleTitleClick(e.clientX, e.clientY); return; }
+  if (gameState === 'shop') { handleShopClick(e.clientX, e.clientY); return; }
   if (gameState === 'win') {
     if (showingNameEntry) { handleNameClick(e.clientX, e.clientY); return; }
     if (winTime > 2) { resetToTitle(); return; }
@@ -392,11 +638,40 @@ canvas.addEventListener('pointerdown', e => {
   touchActive = true;
 });
 canvas.addEventListener('pointermove', e => {
+  if (gameState === 'title') { return; }
   if (gameState !== 'playing') return;
   if (touchActive) touchTargetX = e.clientX;
 });
 canvas.addEventListener('pointerup', e => { touchActive = false; });
 canvas.addEventListener('pointercancel', e => { touchActive = false; });
+
+// Touch scroll for title
+let titleTouchStartY = null;
+let titleTouchLastY = null;
+canvas.addEventListener('touchstart', e => {
+  if (gameState === 'title') {
+    titleTouchStartY = e.touches[0].clientY;
+    titleTouchLastY = e.touches[0].clientY;
+  }
+}, { passive: true });
+canvas.addEventListener('touchmove', e => {
+  if (gameState === 'title' && titleTouchLastY !== null) {
+    const dy = titleTouchLastY - e.touches[0].clientY;
+    titleScrollY = Math.max(0, Math.min(titleMaxScroll, titleScrollY + dy));
+    titleTouchLastY = e.touches[0].clientY;
+  }
+}, { passive: true });
+canvas.addEventListener('touchend', e => {
+  titleTouchStartY = null;
+  titleTouchLastY = null;
+});
+
+// Mouse wheel for title scroll
+canvas.addEventListener('wheel', e => {
+  if (gameState === 'title') {
+    titleScrollY = Math.max(0, Math.min(titleMaxScroll, titleScrollY + e.deltaY * 0.5));
+  }
+});
 
 // --- Name Entry ---
 function handleNameClick(cx, cy) {
@@ -435,25 +710,48 @@ let _diffBtns = [];
 let _lbTabBtns = [];
 let _startBtn = null;
 let _dailyBtn = null;
+let _endlessBtn = null;
+let _shopBtn = null;
 let _skinBtns = [];
+let _shopBackBtn = null;
+let _shopItemBtns = [];
 
 function handleTitleClick(cx, cy) {
+  // Adjust cy for scroll
+  const acy = cy + titleScrollY;
+  
   if (_startBtn) {
-    if (cx >= _startBtn.x && cx <= _startBtn.x+_startBtn.w && cy >= _startBtn.y && cy <= _startBtn.y+_startBtn.h) {
+    if (cx >= _startBtn.x && cx <= _startBtn.x+_startBtn.w && acy >= _startBtn.y && acy <= _startBtn.y+_startBtn.h) {
       isDailyChallenge = false;
+      gameMode = 'race';
       startGame();
       return;
     }
   }
   if (_dailyBtn) {
-    if (cx >= _dailyBtn.x && cx <= _dailyBtn.x+_dailyBtn.w && cy >= _dailyBtn.y && cy <= _dailyBtn.y+_dailyBtn.h) {
+    if (cx >= _dailyBtn.x && cx <= _dailyBtn.x+_dailyBtn.w && acy >= _dailyBtn.y && acy <= _dailyBtn.y+_dailyBtn.h) {
       isDailyChallenge = true;
+      gameMode = 'race';
       startGame(getDailySeed());
       return;
     }
   }
+  if (_endlessBtn) {
+    if (cx >= _endlessBtn.x && cx <= _endlessBtn.x+_endlessBtn.w && acy >= _endlessBtn.y && acy <= _endlessBtn.y+_endlessBtn.h) {
+      isDailyChallenge = false;
+      gameMode = 'endless';
+      startGame();
+      return;
+    }
+  }
+  if (_shopBtn) {
+    if (cx >= _shopBtn.x && cx <= _shopBtn.x+_shopBtn.w && acy >= _shopBtn.y && acy <= _shopBtn.y+_shopBtn.h) {
+      gameState = 'shop';
+      return;
+    }
+  }
   for (const btn of _diffBtns) {
-    if (cx >= btn.x && cx <= btn.x+btn.w && cy >= btn.y && cy <= btn.y+btn.h) {
+    if (cx >= btn.x && cx <= btn.x+btn.w && acy >= btn.y && acy <= btn.y+btn.h) {
       currentDifficulty = btn.key;
       selectedDifficultyForLB = btn.key;
       leaderboard = leaderboards[btn.key] || [];
@@ -462,7 +760,7 @@ function handleTitleClick(cx, cy) {
     }
   }
   for (const btn of _skinBtns) {
-    if (cx >= btn.x && cx <= btn.x+btn.w && cy >= btn.y && cy <= btn.y+btn.h) {
+    if (cx >= btn.x && cx <= btn.x+btn.w && acy >= btn.y && acy <= btn.y+btn.h) {
       if (isSkinUnlocked(btn.skin)) {
         selectedSkin = btn.skin.id;
         saveSelectedSkin(btn.skin.id);
@@ -472,10 +770,31 @@ function handleTitleClick(cx, cy) {
     }
   }
   for (const btn of _lbTabBtns) {
-    if (cx >= btn.x && cx <= btn.x+btn.w && cy >= btn.y && cy <= btn.y+btn.h) {
+    if (cx >= btn.x && cx <= btn.x+btn.w && acy >= btn.y && acy <= btn.y+btn.h) {
       selectedDifficultyForLB = btn.key;
       leaderboard = leaderboards[btn.key] || [];
       fetchLeaderboard(btn.key);
+      return;
+    }
+  }
+}
+
+function handleShopClick(cx, cy) {
+  if (_shopBackBtn) {
+    if (cx >= _shopBackBtn.x && cx <= _shopBackBtn.x+_shopBackBtn.w && cy >= _shopBackBtn.y && cy <= _shopBackBtn.y+_shopBackBtn.h) {
+      gameState = 'title';
+      return;
+    }
+  }
+  for (const btn of _shopItemBtns) {
+    if (cx >= btn.x && cx <= btn.x+btn.w && cy >= btn.y && cy <= btn.y+btn.h) {
+      if (coinBalance >= btn.item.price && !purchasedItems.includes(btn.item.id)) {
+        coinBalance -= btn.item.price;
+        saveCoins(coinBalance);
+        purchasedItems.push(btn.item.id);
+        savePurchasedItems(purchasedItems);
+        playCoinSound();
+      }
       return;
     }
   }
@@ -489,13 +808,63 @@ function startGame(seed) {
   collectedSet = new Set();
   collectedObstacles = new Set();
   collectedPowerUps = new Set();
+  collectedCoins = new Set();
+  coinsCollectedThisRun = 0;
   particles = []; fireworks = []; floatingTexts = [];
   combo = 0; comboTimer = 0; comboBreakEffect = 0;
   activePowerUp = null;
   slowTimer = 0; slowFactor = 1.0;
   sprintActive = false; sprintFlashTimer = 0;
   shakeAmount = 0;
+  rainbowBurstEffect = 0;
+  rainbowBurstRadius = 0;
+  lastBurstCombo = 0;
+  nearMissFlash = 0;
+  resetRunStats();
+  missionCompleteQueue = [];
+  currentRunPositions = [];
+
+  // Apply purchased boosts
+  activeBoosts = {};
+  const newPurchased = [];
+  for (const id of purchasedItems) {
+    activeBoosts[id] = true;
+  }
+  // Clear purchased items (consumed)
+  purchasedItems = [];
+  savePurchasedItems(purchasedItems);
+
+  if (gameMode === 'endless') {
+    endlessLives = 3;
+    if (activeBoosts.extralife) endlessLives = 4;
+    endlessSpeed = 125;
+    endlessTime = 0;
+    endlessLevelUpTimer = 0;
+    endlessLevelUpFlash = 0;
+    endlessLevel = 1;
+    lostLifeAnim = 0;
+    currentDifficulty = 'easy'; // for hitMult etc
+  }
+
   generateTrack(seed);
+
+  // Head start boost
+  if (activeBoosts.headstart && gameMode === 'race') {
+    distance = currentTrackLength * 0.1;
+  }
+
+  // Magnet boost
+  if (activeBoosts.magnet) {
+    activePowerUp = { type: 'magnet', timeLeft: 8 };
+  }
+
+  // Load ghost
+  if (gameMode === 'race') {
+    ghostData = loadGhostData(currentDifficulty);
+  } else {
+    ghostData = null;
+  }
+
   startMelody();
 }
 
@@ -503,21 +872,71 @@ function resetToTitle() {
   gameState = 'title'; titleTime = 0;
   stopMelody();
   particles = []; fireworks = [];
-  selectedDifficultyForLB = currentDifficulty;
-  fetchLeaderboard(currentDifficulty);
+  selectedDifficultyForLB = gameMode === 'endless' ? 'endless' : currentDifficulty;
+  fetchLeaderboard(selectedDifficultyForLB);
+}
+
+// --- Check missions ---
+function checkMissions() {
+  for (let i = 0; i < missions.length; i++) {
+    if (missions[i].completed) continue;
+    const m = missions[i];
+    let complete = false;
+    
+    if (m.type === 'no_clouds') {
+      // Checked at end of race
+      continue;
+    }
+    
+    if (m.stat === 'maxCombo') {
+      if (runStats.maxCombo >= m.target) complete = true;
+    } else if (m.stat === 'endlessDistance') {
+      if (gameMode === 'endless' && distance >= m.target) complete = true;
+    } else if (runStats[m.stat] >= m.target) {
+      complete = true;
+    }
+    
+    if (complete) {
+      missions[i].completed = true;
+      coinBalance += 25;
+      saveCoins(coinBalance);
+      missionCompleteQueue.push(m.desc);
+      playMissionComplete();
+    }
+  }
+}
+
+function finalizeMissions() {
+  // Check no-clouds mission
+  for (let i = 0; i < missions.length; i++) {
+    if (missions[i].completed) continue;
+    if (missions[i].type === 'no_clouds' && gameMode === 'race') {
+      if (runStats.noCloudHit) {
+        missions[i].completed = true;
+        coinBalance += 25;
+        saveCoins(coinBalance);
+        missionCompleteQueue.push(missions[i].desc);
+      }
+    }
+  }
+  // Replace completed missions
+  for (let i = 0; i < missions.length; i++) {
+    if (missions[i].completed) {
+      missions[i] = generateMission();
+    }
+  }
+  saveMissions(missions);
 }
 
 // --- Combo check: detect missed rainbows ---
 function checkMissedRainbows() {
   const viewRange = 600;
-  const laneWidth = 0.3; // road area half-width for "reasonable range"
+  const laneWidth = 0.3;
   trackRainbows.forEach((rb, i) => {
     if (collectedSet.has(i)) return;
     if (rb._missed) return;
     const relY = (rb.y - distance) / viewRange;
-    // Rainbow has passed below the unicorn
     if (relY < -0.05) {
-      // Only count as miss if it was within the road area horizontally
       const laneCenter = 0.5 + getLaneCenterOffset(rb.y);
       if (Math.abs(rb.x - laneCenter) < laneWidth) {
         rb._missed = true;
@@ -533,8 +952,11 @@ function checkMissedRainbows() {
 
 // --- Update ---
 let lastTime = 0;
+let missionCompleteDisplayTimer = 0;
+let missionCompleteText = '';
+
 function update(dt) {
-  if (gameState === 'title') { titleTime += dt; return; }
+  if (gameState === 'title' || gameState === 'shop') { titleTime += dt; return; }
   if (gameState === 'win') {
     winTime += dt;
     if (Math.random() < 0.15) spawnFirework(Math.random()*W, Math.random()*H*0.6);
@@ -549,13 +971,52 @@ function update(dt) {
   const speed = getCurrentSpeed();
   distance += speed * dt;
 
-  // Sprint detection
-  const progress = distance / TRACK_LENGTH;
-  if (progress >= 0.8 && !sprintActive) {
-    sprintActive = true;
-    sprintFlashTimer = 2.0;
+  // Endless mode updates
+  if (gameMode === 'endless') {
+    endlessTime += dt;
+    runStats.endlessDistance = Math.floor(distance);
+    
+    // Speed ramp: increase by ~5 every 30 seconds
+    endlessSpeed = 125 + endlessTime * (5/30);
+    
+    // Level up every 30 seconds
+    endlessLevelUpTimer += dt;
+    if (endlessLevelUpTimer >= 30) {
+      endlessLevelUpTimer -= 30;
+      endlessLevel++;
+      endlessLevelUpFlash = 2.0;
+      playLevelUp();
+    }
+    if (endlessLevelUpFlash > 0) endlessLevelUpFlash -= dt;
+    if (lostLifeAnim > 0) lostLifeAnim -= dt * 3;
+
+    // Generate more chunks ahead
+    if (distance + 2000 > endlessGenerated) {
+      const from = endlessGenerated;
+      const to = endlessGenerated + 2000;
+      generateEndlessChunk(from, to, endlessRng);
+      endlessGenerated = to;
+    }
+    // Cleanup
+    if (distance > 2000) cleanupEndlessEntities();
   }
-  if (sprintFlashTimer > 0) sprintFlashTimer -= dt;
+
+  // Race mode
+  if (gameMode === 'race') {
+    const TL = currentTrackLength;
+    const progress = distance / TL;
+    if (progress >= 0.8 && !sprintActive) {
+      sprintActive = true;
+      sprintFlashTimer = 2.0;
+    }
+    if (sprintFlashTimer > 0) sprintFlashTimer -= dt;
+
+    // Record ghost position
+    const checkpoint = Math.floor(distance / 100);
+    while (currentRunPositions.length <= checkpoint) {
+      currentRunPositions.push(unicorn.x);
+    }
+  }
 
   // Slow timer
   if (slowTimer > 0) slowTimer -= dt;
@@ -579,18 +1040,45 @@ function update(dt) {
   // Screen shake decay
   if (shakeAmount > 0) shakeAmount *= 0.92;
 
-  // Check win
-  if (distance >= TRACK_LENGTH) {
-    distance = TRACK_LENGTH;
+  // Near miss flash decay
+  if (nearMissFlash > 0) nearMissFlash -= dt * 4;
+
+  // Rainbow burst effect
+  if (rainbowBurstEffect > 0) {
+    rainbowBurstEffect -= dt * 1.5;
+    rainbowBurstRadius += dt * 800;
+  }
+
+  // Mission complete display
+  if (missionCompleteDisplayTimer > 0) {
+    missionCompleteDisplayTimer -= dt;
+  } else if (missionCompleteQueue.length > 0) {
+    missionCompleteText = missionCompleteQueue.shift();
+    missionCompleteDisplayTimer = 3.0;
+  }
+
+  // Check win (race mode)
+  if (gameMode === 'race' && distance >= currentTrackLength) {
+    distance = currentTrackLength;
     gameState = 'win'; winTime = 0;
     playWinFanfare();
     for (let i=0;i<10;i++) spawnFirework(Math.random()*W, Math.random()*H*0.5);
-    // Update cumulative score
     cumulativeScore += score;
     saveCumulativeScore(cumulativeScore);
-    // Check if top 10
-    const minTop10 = leaderboard.length >= 10 ? leaderboard[leaderboard.length-1].score : 0;
-    if (score > minTop10 || leaderboard.length < 10) {
+    // Award coins
+    const bonusCoins = Math.floor(score / 100);
+    coinBalance += coinsCollectedThisRun + bonusCoins;
+    saveCoins(coinBalance);
+    // Save ghost if best
+    const prevGhost = loadGhostData(currentDifficulty);
+    if (!prevGhost || score > prevGhost.score) {
+      saveGhostData(currentDifficulty, { score, positions: currentRunPositions });
+    }
+    finalizeMissions();
+    const diff = gameMode === 'endless' ? 'endless' : currentDifficulty;
+    const lb = leaderboards[diff] || [];
+    const minTop10 = lb.length >= 10 ? lb[lb.length-1].score : 0;
+    if (score > minTop10 || lb.length < 10) {
       showingNameEntry = true;
       pendingScore = score;
       nameInput = '';
@@ -655,18 +1143,22 @@ function update(dt) {
   const unicornScreenX = unicorn.x * W;
   const scaledHitRadius = unicorn.scale;
 
-  // Magnet: pull rainbows toward unicorn
+  // Magnet: pull rainbows and coins toward unicorn
   if (activePowerUp && activePowerUp.type === 'magnet') {
-    const magnetRadius = 0.25; // fraction of screen width
+    const magnetRadius = 0.25;
     trackRainbows.forEach((rb, i) => {
       if (collectedSet.has(i)) return;
       const relY = (rb.y - distance) / viewRange;
       if (relY < -0.1 || relY > 1.1) return;
       const dx = unicorn.x - rb.x;
-      const dist = Math.abs(dx);
-      if (dist < magnetRadius) {
-        rb.x += dx * 3 * dt; // pull toward unicorn
-      }
+      if (Math.abs(dx) < magnetRadius) rb.x += dx * 3 * dt;
+    });
+    trackCoins.forEach((c, i) => {
+      if (collectedCoins.has(i)) return;
+      const relY = (c.y - distance) / viewRange;
+      if (relY < -0.1 || relY > 1.1) return;
+      const dx = unicorn.x - c.x;
+      if (Math.abs(dx) < magnetRadius) c.x += dx * 3 * dt;
     });
   }
 
@@ -695,6 +1187,15 @@ function update(dt) {
       score += pts;
       combo++;
       comboTimer = 2.0;
+      runStats.totalRainbows++;
+      if (rb.type === 'gold') runStats.goldRainbows++;
+      if (combo > runStats.maxCombo) runStats.maxCombo = combo;
+      
+      // Rainbow burst check
+      if (combo > 0 && combo % 10 === 0 && combo !== lastBurstCombo) {
+        triggerRainbowBurst();
+        lastBurstCombo = combo;
+      }
       
       unicorn.sparkle = 1;
       playEatSound(rb.points);
@@ -702,13 +1203,31 @@ function update(dt) {
       const color = rb.type === 'gold' ? '#ffd700' : rb.type === 'big' ? '#ff6b9d' : '#4dc9ff';
       spawnParticles(screenRbX, screenRbY, color, rb.type === 'gold' ? 20 : 10, rb.type === 'gold' ? 5 : 3);
       
-      // Floating text
       const multText = mult > 1 ? ` x${mult}!` : '';
       addFloatingText(screenRbX, screenRbY - 20, `+${pts}${multText}`, color);
     }
   });
 
-  // Obstacle collision
+  // Coin collision
+  trackCoins.forEach((c, idx) => {
+    if (collectedCoins.has(idx)) return;
+    const relY = (c.y - distance) / viewRange;
+    if (relY < -0.1 || relY > 1.1) return;
+    const screenCY = H * (1 - relY * 0.85 - 0.08);
+    const screenCX = c.x * W;
+    const dx = screenCX - unicornScreenX;
+    const dy = screenCY - unicornScreenY;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (dist < 40 * scaledHitRadius) {
+      collectedCoins.add(idx);
+      coinsCollectedThisRun++;
+      playCoinSound();
+      spawnParticles(screenCX, screenCY, '#ffd700', 10, 4);
+      addFloatingText(screenCX, screenCY - 20, '🪙 +1', '#ffd700');
+    }
+  });
+
+  // Obstacle collision + near-miss
   trackObstacles.forEach((obs, i) => {
     if (collectedObstacles.has(i)) return;
     const relY = (obs.y - distance) / viewRange;
@@ -721,20 +1240,64 @@ function update(dt) {
     const dyScreen = screenObsY - unicornScreenY;
     const dist = Math.sqrt(dx*dx + dyScreen*dyScreen);
     const hitRadius = obs.type === 'cloud' ? 35 : 25;
+    const actualHit = hitRadius * scaledHitRadius;
+    const nearMissRadius = actualHit * 1.5;
 
-    if (dist < hitRadius * scaledHitRadius) {
+    if (dist < actualHit) {
       collectedObstacles.add(i);
-      // Shield blocks slowdown
       if (activePowerUp && activePowerUp.type === 'shield') {
         spawnParticles(screenObsX, screenObsY, '#4dc9ff', 10, 4);
         addFloatingText(screenObsX, screenObsY - 20, '🛡️ Blocked!', '#4dc9ff');
       } else {
-        slowTimer = obs.slowDuration;
-        playObstacleHit();
-        spawnParticles(screenObsX, screenObsY, '#8b00ff', 12, 4);
-        shakeAmount = 8;
-        addFloatingText(screenObsX, screenObsY - 20, 'SLOW! 💫', '#ff4444');
+        if (gameMode === 'endless') {
+          // Lose a life
+          endlessLives--;
+          lostLifeAnim = 1.0;
+          shakeAmount = 12;
+          playObstacleHit();
+          spawnParticles(screenObsX, screenObsY, '#ff0000', 15, 5);
+          addFloatingText(screenObsX, screenObsY - 20, '💔 -1 LIFE!', '#ff4444');
+          if (obs.type === 'cloud') runStats.noCloudHit = false;
+          if (endlessLives <= 0) {
+            // Game over
+            gameState = 'win'; winTime = 0;
+            cumulativeScore += score;
+            saveCumulativeScore(cumulativeScore);
+            const bonusCoins = Math.floor(score / 100);
+            coinBalance += coinsCollectedThisRun + bonusCoins;
+            saveCoins(coinBalance);
+            finalizeMissions();
+            for (let j=0;j<5;j++) spawnFirework(Math.random()*W, Math.random()*H*0.5);
+            const lb = leaderboards.endless || [];
+            const minTop10 = lb.length >= 10 ? lb[lb.length-1].score : 0;
+            if (score > minTop10 || lb.length < 10) {
+              showingNameEntry = true;
+              pendingScore = score;
+              nameInput = '';
+              window._nameSubmitted = false;
+            } else {
+              showingNameEntry = false;
+              window._nameSubmitted = false;
+            }
+            return;
+          }
+        } else {
+          slowTimer = obs.slowDuration;
+          if (obs.type === 'cloud') runStats.noCloudHit = false;
+          playObstacleHit();
+          spawnParticles(screenObsX, screenObsY, '#8b00ff', 12, 4);
+          shakeAmount = 8;
+          addFloatingText(screenObsX, screenObsY - 20, 'SLOW! 💫', '#ff4444');
+        }
       }
+    } else if (dist < nearMissRadius && !obs.nearMissTriggered) {
+      // Near miss!
+      obs.nearMissTriggered = true;
+      score += 25;
+      nearMissFlash = 1.0;
+      playNearMiss();
+      addFloatingText(screenObsX, screenObsY - 30, 'CLOSE CALL! 😱 +25', '#ffff00');
+      spawnParticles(screenObsX, screenObsY, '#ffff00', 6, 2);
     }
   });
 
@@ -755,7 +1318,8 @@ function update(dt) {
       collectedPowerUps.add(i);
       const durations = { magnet: 5, shield: 5, rocket: 3, giant: 4 };
       activePowerUp = { type: pu.type, timeLeft: durations[pu.type] };
-      if (pu.type === 'giant') unicorn.scale = 1.1; // start growing
+      if (pu.type === 'giant') unicorn.scale = 1.1;
+      runStats.powerupsUsed++;
       playPowerUp();
       spawnParticles(screenPuX, screenPuY, '#fff', 15, 5);
       const icons = { magnet: '🧲', shield: '🛡️', rocket: '🚀', giant: '🦄' };
@@ -765,6 +1329,9 @@ function update(dt) {
 
   // Check missed rainbows for combo
   checkMissedRainbows();
+
+  // Check missions
+  checkMissions();
 
   // Combo timer
   if (comboTimer > 0) comboTimer -= dt;
@@ -786,6 +1353,49 @@ function update(dt) {
     c.y += getCurrentSpeed() * dt * 0.3;
     if (c.y > H + 100) { c.y = -100; c.x = Math.random(); }
   });
+}
+
+function triggerRainbowBurst() {
+  rainbowBurstEffect = 1.0;
+  rainbowBurstRadius = 0;
+  runStats.rainbowBursts++;
+  playRainbowBurst();
+  addFloatingText(W/2, H*0.35, '🌈 RAINBOW BURST! 🌈', '#fff');
+  
+  // Collect all visible rainbows
+  const viewRange = 600;
+  trackRainbows.forEach((rb, i) => {
+    if (collectedSet.has(i)) return;
+    const relY = (rb.y - distance) / viewRange;
+    if (relY < -0.1 || relY > 1.1) return;
+    collectedSet.add(i);
+    const mult = getComboMultiplier();
+    const pts = Math.round(rb.points * mult);
+    score += pts;
+    runStats.totalRainbows++;
+    if (rb.type === 'gold') runStats.goldRainbows++;
+    
+    const screenRbY = H * (1 - relY * 0.85 - 0.08);
+    const screenRbX = rb.x * W;
+    spawnParticles(screenRbX, screenRbY, '#ffd700', 5, 3);
+  });
+  
+  // Big particle burst from unicorn
+  const ux = unicorn.x * W;
+  const uy = H * 0.72;
+  const burstColors = ['#ff0000','#ff8800','#ffdd00','#00cc44','#0088ff','#cc44cc'];
+  for (let i = 0; i < 40; i++) {
+    const angle = (i / 40) * Math.PI * 2;
+    const speed = Math.random()*6+3;
+    particles.push({
+      x: ux, y: uy,
+      vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed,
+      life: 1, decay: 0.015,
+      color: burstColors[i % burstColors.length],
+      size: Math.random()*6+3,
+      type: 'circle',
+    });
+  }
 }
 
 // --- Draw Helpers ---
@@ -815,7 +1425,6 @@ function drawObstacle(x, y, obs) {
   ctx.save();
   ctx.translate(x, y);
   
-  // Warning glow
   ctx.globalAlpha = 0.3 + Math.sin(Date.now()/200) * 0.15;
   const warnGrad = ctx.createRadialGradient(0, 0, 5, 0, 0, 45);
   warnGrad.addColorStop(0, 'rgba(255,100,0,0.4)');
@@ -825,12 +1434,10 @@ function drawObstacle(x, y, obs) {
   ctx.globalAlpha = 1;
 
   if (obs.type === 'cloud') {
-    // Dark purple storm cloud
     ctx.fillStyle = '#3d1a6e';
     ctx.beginPath(); ctx.ellipse(0, 0, 30, 18, 0, 0, Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.ellipse(-12, -8, 18, 14, 0, 0, Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.ellipse(10, -6, 16, 12, 0, 0, Math.PI*2); ctx.fill();
-    // Lightning sparkles
     ctx.strokeStyle = '#ffff00';
     ctx.lineWidth = 2;
     ctx.globalAlpha = 0.5 + Math.sin(Date.now()/100)*0.5;
@@ -839,7 +1446,6 @@ function drawObstacle(x, y, obs) {
     ctx.beginPath(); ctx.moveTo(10, 8); ctx.lineTo(13, 16); ctx.stroke();
     ctx.globalAlpha = 1;
   } else {
-    // Spinning star
     ctx.rotate(Date.now() / 200 + obs.rotation);
     drawStar(0, 0, 18, 5, '#ff4488');
     ctx.fillStyle = '#ff88aa';
@@ -854,7 +1460,6 @@ function drawPowerUpItem(x, y, pu) {
   ctx.save();
   ctx.translate(x, y);
   
-  // Glow
   const t = Date.now() / 300;
   ctx.globalAlpha = 0.4 + Math.sin(t) * 0.2;
   const glowGrad = ctx.createRadialGradient(0, 0, 5, 0, 0, 35);
@@ -864,7 +1469,6 @@ function drawPowerUpItem(x, y, pu) {
   ctx.beginPath(); ctx.arc(0, 0, 35, 0, Math.PI*2); ctx.fill();
   ctx.globalAlpha = 1;
 
-  // Box
   const colors = { magnet: '#ff4444', shield: '#4dc9ff', rocket: '#ff8800', giant: '#c44dff' };
   ctx.fillStyle = colors[pu.type];
   ctx.beginPath(); ctx.roundRect(-16, -16, 32, 32, 8); ctx.fill();
@@ -872,13 +1476,53 @@ function drawPowerUpItem(x, y, pu) {
   ctx.lineWidth = 2;
   ctx.beginPath(); ctx.roundRect(-16, -16, 32, 32, 8); ctx.stroke();
 
-  // Icon
   ctx.font = '18px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const icons = { magnet: '🧲', shield: '🛡️', rocket: '🚀', giant: '🦄' };
   ctx.fillText(icons[pu.type], 0, 1);
 
+  ctx.restore();
+}
+
+// --- Draw Coin ---
+function drawCoin(x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  
+  const t = Date.now() / 200;
+  const scaleX = Math.abs(Math.cos(t)); // spinning effect
+  
+  // Glow
+  ctx.globalAlpha = 0.4;
+  const glowGrad = ctx.createRadialGradient(0, 0, 3, 0, 0, 20);
+  glowGrad.addColorStop(0, 'rgba(255,215,0,0.6)');
+  glowGrad.addColorStop(1, 'rgba(255,215,0,0)');
+  ctx.fillStyle = glowGrad;
+  ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI*2); ctx.fill();
+  ctx.globalAlpha = 1;
+  
+  ctx.scale(Math.max(0.2, scaleX), 1);
+  
+  // Gold circle
+  ctx.fillStyle = '#ffd700';
+  ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#daa520';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, 12, 0, Math.PI*2); ctx.stroke();
+  
+  // Inner detail
+  ctx.fillStyle = '#ffec80';
+  ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI*2); ctx.fill();
+  
+  if (scaleX > 0.3) {
+    ctx.fillStyle = '#daa520';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('¢', 0, 1);
+  }
+  
   ctx.restore();
 }
 
@@ -929,7 +1573,7 @@ function drawUnicorn(x, y, sparkle) {
   ctx.fillStyle = bodyColor;
   ctx.beginPath(); ctx.ellipse(0, -12, 14, 12, 0, 0, Math.PI*2); ctx.fill(); ctx.stroke();
 
-  // Diamond sparkles on body
+  // Diamond sparkles
   if (skin.id === 'diamond') {
     for (let i = 0; i < 5; i++) {
       const sx = Math.sin(Date.now()/300 + i*1.3) * 12;
@@ -940,7 +1584,7 @@ function drawUnicorn(x, y, sparkle) {
     ctx.globalAlpha = 1;
   }
 
-  // Galaxy stars on body
+  // Galaxy stars
   if (skin.id === 'galaxy') {
     for (let i = 0; i < 6; i++) {
       const sx = Math.sin(i*1.1) * 14;
@@ -1021,6 +1665,32 @@ function drawUnicorn(x, y, sparkle) {
   ctx.restore();
 }
 
+// --- Draw Ghost Unicorn ---
+function drawGhostUnicorn(x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.globalAlpha = 0.2;
+  ctx.scale(0.85, 0.85);
+  
+  // Simple body
+  ctx.fillStyle = '#aaa';
+  ctx.beginPath(); ctx.ellipse(0, 8, 20, 16, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0, -12, 14, 12, 0, 0, Math.PI*2); ctx.fill();
+  
+  // Horn
+  ctx.fillStyle = '#ccc';
+  ctx.beginPath(); ctx.moveTo(0, -32); ctx.lineTo(-5, -18); ctx.lineTo(5, -18); ctx.closePath(); ctx.fill();
+  
+  // PB label
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = '#ffd700';
+  ctx.font = 'bold 10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('PB', 0, -38);
+  
+  ctx.restore();
+}
+
 // --- Draw Rainbow Collectible ---
 function drawRainbow(x, y, type) {
   ctx.save();
@@ -1095,7 +1765,8 @@ function drawFinishRainbow(y) {
 
 // --- Draw Background ---
 function drawPlayBackground() {
-  const progress = distance / TRACK_LENGTH;
+  const TL = gameMode === 'endless' ? Math.max(10000, distance + 5000) : currentTrackLength;
+  const progress = distance / TL;
   const grad = ctx.createLinearGradient(0, 0, 0, H);
   const r1 = Math.floor(20 + progress*50);
   const g1 = Math.floor(8 + progress*30);
@@ -1103,12 +1774,11 @@ function drawPlayBackground() {
   const r2 = Math.floor(40 + progress*80);
   const g2 = Math.floor(15 + progress*50);
   const b2 = Math.floor(80 + progress*70);
-  grad.addColorStop(0, `rgb(${r1},${g1},${b1})`);
-  grad.addColorStop(1, `rgb(${r2},${g2},${b2})`);
+  grad.addColorStop(0, `rgb(${Math.min(r1,255)},${Math.min(g1,255)},${Math.min(b1,255)})`);
+  grad.addColorStop(1, `rgb(${Math.min(r2,255)},${Math.min(g2,255)},${Math.min(b2,255)})`);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
-  // Scrolling stars
   const viewRange = 600;
   trackStars.forEach(s => {
     const relY = (s.y - distance) / viewRange;
@@ -1125,12 +1795,11 @@ function drawPlayBackground() {
 
   bgClouds.forEach(c => drawCloud(c.x * W, c.y, c.w, c.alpha));
 
-  // Curving rainbow road lane
   const laneW = W * 0.5;
-  // Draw lane segments following the curve
+  const curveAggr = gameMode === 'endless' ? Math.min(3, 1 + distance / 50000) : 1;
   for (let sy = 0; sy < H; sy += 4) {
     const trackY = distance + ((H - sy) / H) * viewRange;
-    const offset = getLaneCenterOffset(trackY);
+    const offset = getLaneCenterOffset(trackY, curveAggr);
     const centerX = (0.5 + offset) * W;
     const alpha = 0.04;
     const rainbowPos = (sy / H + Date.now() * 0.0001) % 1;
@@ -1139,14 +1808,13 @@ function drawPlayBackground() {
     ctx.fillRect(centerX - laneW/2, sy, laneW, 5);
   }
 
-  // Lane edge lines (curved)
   ctx.strokeStyle = 'rgba(255,255,255,0.06)';
   ctx.lineWidth = 2;
   ctx.setLineDash([10, 20]);
   ctx.beginPath();
   for (let sy = 0; sy < H; sy += 2) {
     const trackY = distance + ((H - sy) / H) * viewRange;
-    const offset = getLaneCenterOffset(trackY);
+    const offset = getLaneCenterOffset(trackY, curveAggr);
     const centerX = (0.5 + offset) * W;
     if (sy === 0) ctx.moveTo(centerX - laneW/2, sy);
     else ctx.lineTo(centerX - laneW/2, sy);
@@ -1155,7 +1823,7 @@ function drawPlayBackground() {
   ctx.beginPath();
   for (let sy = 0; sy < H; sy += 2) {
     const trackY = distance + ((H - sy) / H) * viewRange;
-    const offset = getLaneCenterOffset(trackY);
+    const offset = getLaneCenterOffset(trackY, curveAggr);
     const centerX = (0.5 + offset) * W;
     if (sy === 0) ctx.moveTo(centerX + laneW/2, sy);
     else ctx.lineTo(centerX + laneW/2, sy);
@@ -1163,8 +1831,7 @@ function drawPlayBackground() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Sprint edge glow
-  if (sprintActive) {
+  if (sprintActive && gameMode === 'race') {
     const intensity = 0.15 + Math.sin(Date.now()/200) * 0.1;
     const edgeGrad = ctx.createLinearGradient(0, 0, W*0.15, 0);
     edgeGrad.addColorStop(0, `rgba(255,80,0,${intensity})`);
@@ -1177,25 +1844,95 @@ function drawPlayBackground() {
     ctx.fillStyle = edgeGrad2;
     ctx.fillRect(W*0.85, 0, W*0.15, H);
   }
+
+  // Near-miss yellow flash
+  if (nearMissFlash > 0) {
+    ctx.globalAlpha = nearMissFlash * 0.3;
+    ctx.fillStyle = '#ffff00';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+
+  // Rainbow burst shockwave
+  if (rainbowBurstEffect > 0) {
+    ctx.globalAlpha = rainbowBurstEffect * 0.4;
+    const ux = unicorn.x * W;
+    const uy = H * 0.72;
+    const burstColors = ['#ff0000','#ff8800','#ffdd00','#00cc44','#0088ff','#cc44cc'];
+    for (let i = 0; i < 6; i++) {
+      ctx.strokeStyle = burstColors[i];
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(ux, uy, rainbowBurstRadius + i * 5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
 }
 
 // --- Draw HUD ---
 function drawHUD() {
-  const progress = distance / TRACK_LENGTH;
+  const TL = gameMode === 'endless' ? 1 : currentTrackLength;
+  const progress = gameMode === 'endless' ? 0 : distance / TL;
   const diff = DIFFICULTIES[currentDifficulty];
 
-  // Difficulty + Daily label
+  // Difficulty + mode label
   ctx.fillStyle = diff.color;
   ctx.font = `bold ${Math.min(13, W*0.025)}px sans-serif`;
   ctx.textAlign = 'left';
   const dailyTag = isDailyChallenge ? ' 📅' : '';
-  ctx.fillText(`${diff.emoji} ${diff.label}${dailyTag}`, 15, 18);
+  const modeTag = gameMode === 'endless' ? '♾️ Endless' : `${diff.emoji} ${diff.label}`;
+  ctx.fillText(`${modeTag}${dailyTag}`, 15, 18);
 
   // Score
   ctx.fillStyle = '#ffd700';
   ctx.font = `bold ${Math.min(22, W*0.04)}px sans-serif`;
   ctx.textAlign = 'left';
   ctx.fillText(`✨ ${score}`, 15, 42);
+
+  // Coins collected this run
+  if (coinsCollectedThisRun > 0) {
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `bold ${Math.min(13, W*0.025)}px sans-serif`;
+    ctx.fillText(`🪙 ${coinsCollectedThisRun}`, 15 + Math.min(22,W*0.04) * 4, 42);
+  }
+
+  // Endless mode: distance + lives
+  if (gameMode === 'endless') {
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.min(14, W*0.028)}px sans-serif`;
+    ctx.textAlign = 'right';
+    ctx.fillText(`📏 ${Math.floor(distance)}m`, W - 15, 18);
+    
+    // Lives (hearts)
+    ctx.textAlign = 'right';
+    ctx.font = `${Math.min(20, W*0.04)}px sans-serif`;
+    let heartsStr = '';
+    for (let i = 0; i < endlessLives; i++) heartsStr += '❤️';
+    for (let i = endlessLives; i < (activeBoosts.extralife ? 4 : 3); i++) heartsStr += '🖤';
+    // Animate lost life
+    if (lostLifeAnim > 0) {
+      ctx.globalAlpha = 0.5 + Math.sin(Date.now()/50) * 0.5;
+    }
+    ctx.fillText(heartsStr, W - 15, 42);
+    ctx.globalAlpha = 1;
+
+    // Level
+    ctx.fillStyle = '#c9a0ff';
+    ctx.font = `bold ${Math.min(12, W*0.024)}px sans-serif`;
+    ctx.textAlign = 'right';
+    ctx.fillText(`Level ${endlessLevel}`, W - 15, 58);
+
+    // Level up flash
+    if (endlessLevelUpFlash > 0) {
+      ctx.globalAlpha = Math.min(1, endlessLevelUpFlash);
+      ctx.fillStyle = '#4dff88';
+      ctx.font = `bold ${Math.min(36, W*0.06)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('⬆️ LEVEL UP! ⬆️', W/2, H*0.3);
+      ctx.globalAlpha = 1;
+    }
+  }
 
   // Combo display
   if (combo >= 3 && comboTimer > 0) {
@@ -1225,23 +1962,35 @@ function drawHUD() {
   }
 
   // Active power-up
+  let puY = 62;
   if (activePowerUp) {
     const icons = { magnet: '🧲', shield: '🛡️', rocket: '🚀', giant: '🦄' };
     const puX = 15;
-    const puY = 62;
     ctx.fillStyle = 'rgba(0,0,0,0.4)';
     ctx.beginPath(); ctx.roundRect(puX, puY, 120, 28, 8); ctx.fill();
     ctx.fillStyle = '#fff';
     ctx.font = `bold ${Math.min(15, W*0.03)}px sans-serif`;
     ctx.textAlign = 'left';
     ctx.fillText(`${icons[activePowerUp.type]} ${activePowerUp.type.toUpperCase()}`, puX+6, puY+14);
-    // Timer bar
     const maxDur = { magnet: 5, shield: 5, rocket: 3, giant: 4 }[activePowerUp.type];
     const frac = activePowerUp.timeLeft / maxDur;
     ctx.fillStyle = 'rgba(255,255,255,0.3)';
     ctx.fillRect(puX+6, puY+20, 108, 4);
     ctx.fillStyle = '#4dff88';
     ctx.fillRect(puX+6, puY+20, 108*frac, 4);
+    puY += 32;
+  }
+
+  // Active boosts display
+  const boostIcons = [];
+  if (activeBoosts.scoreboost) boostIcons.push('⭐1.5x');
+  if (activeBoosts.headstart) boostIcons.push('🚀Start');
+  if (boostIcons.length > 0) {
+    ctx.fillStyle = '#c9a0ff';
+    ctx.font = `bold ${Math.min(10, W*0.02)}px sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillText(boostIcons.join(' | '), 15, puY + 12);
+    puY += 16;
   }
 
   // Speed indicator
@@ -1249,10 +1998,10 @@ function drawHUD() {
   ctx.fillStyle = slowTimer > 0 ? '#ff4444' : sprintActive ? '#ff8800' : '#aaa';
   ctx.font = `bold ${Math.min(12, W*0.024)}px sans-serif`;
   ctx.textAlign = 'left';
-  ctx.fillText(`⚡ ${speedPct}%`, 15, activePowerUp ? 105 : 62);
+  ctx.fillText(`⚡ ${speedPct}%`, 15, puY + 12);
 
   // Sprint flash
-  if (sprintFlashTimer > 0) {
+  if (sprintFlashTimer > 0 && gameMode === 'race') {
     ctx.globalAlpha = Math.min(1, sprintFlashTimer);
     ctx.fillStyle = '#ff4400';
     ctx.font = `bold ${Math.min(36, W*0.06)}px sans-serif`;
@@ -1271,48 +2020,62 @@ function drawHUD() {
     ctx.fillText('💫 SLOWED! 💫', W/2, H * 0.55);
   }
 
-  // Progress bar (right side, vertical)
-  const barH = H * 0.6;
-  const barW = 18;
-  const barX = W - 35;
-  const barY = (H - barH) / 2;
-
-  ctx.save();
-  ctx.fillStyle = '#fff';
-  ctx.font = `bold ${Math.min(11, W*0.022)}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.translate(barX + barW/2, barY - 15);
-  ctx.fillText('🌈', 0, 0);
-  ctx.restore();
-
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath(); ctx.roundRect(barX, barY, barW, barH, barW/2); ctx.fill();
-
-  if (progress > 0) {
-    const fillH = barH * progress;
-    const fGrad = ctx.createLinearGradient(0, barY+barH, 0, barY+barH-fillH);
-    fGrad.addColorStop(0, '#ff6b9d');
-    fGrad.addColorStop(0.2, '#ff9e4d');
-    fGrad.addColorStop(0.4, '#ffd700');
-    fGrad.addColorStop(0.6, '#4dff88');
-    fGrad.addColorStop(0.8, '#4dc9ff');
-    fGrad.addColorStop(1, '#c44dff');
-    ctx.fillStyle = fGrad;
-    ctx.beginPath();
-    ctx.roundRect(barX+2, barY+barH-fillH, barW-4, fillH, (barW-4)/2);
-    ctx.fill();
+  // Mission complete display
+  if (missionCompleteDisplayTimer > 0) {
+    ctx.globalAlpha = Math.min(1, missionCompleteDisplayTimer);
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath(); ctx.roundRect(W/2 - 150, H*0.45 - 20, 300, 50, 12); ctx.fill();
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `bold ${Math.min(16, W*0.03)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('MISSION COMPLETE! 🎯 +25 🪙', W/2, H*0.45 + 10);
+    ctx.globalAlpha = 1;
   }
 
-  const indicatorY = barY + barH - barH * progress;
-  ctx.font = '14px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('🦄', barX + barW/2 - 16, indicatorY + 5);
-  ctx.fillText('🌈', barX + barW/2, barY + barH + 18);
+  // Progress bar (right side, vertical) — race mode only
+  if (gameMode === 'race') {
+    const barH = H * 0.6;
+    const barW = 18;
+    const barX = W - 35;
+    const barY = (H - barH) / 2;
 
-  ctx.fillStyle = '#fff';
-  ctx.font = `bold ${Math.min(12, W*0.024)}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.fillText(`${Math.floor(progress*100)}%`, barX + barW/2, barY + barH + 32);
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.min(11, W*0.022)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.translate(barX + barW/2, barY - 15);
+    ctx.fillText('🌈', 0, 0);
+    ctx.restore();
+
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath(); ctx.roundRect(barX, barY, barW, barH, barW/2); ctx.fill();
+
+    if (progress > 0) {
+      const fillH = barH * progress;
+      const fGrad = ctx.createLinearGradient(0, barY+barH, 0, barY+barH-fillH);
+      fGrad.addColorStop(0, '#ff6b9d');
+      fGrad.addColorStop(0.2, '#ff9e4d');
+      fGrad.addColorStop(0.4, '#ffd700');
+      fGrad.addColorStop(0.6, '#4dff88');
+      fGrad.addColorStop(0.8, '#4dc9ff');
+      fGrad.addColorStop(1, '#c44dff');
+      ctx.fillStyle = fGrad;
+      ctx.beginPath();
+      ctx.roundRect(barX+2, barY+barH-fillH, barW-4, fillH, (barW-4)/2);
+      ctx.fill();
+    }
+
+    const indicatorY = barY + barH - barH * progress;
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🦄', barX + barW/2 - 16, indicatorY + 5);
+    ctx.fillText('🌈', barX + barW/2, barY + barH + 18);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.min(12, W*0.024)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`${Math.floor(progress*100)}%`, barX + barW/2, barY + barH + 32);
+  }
 
   // Touch indicators
   if (gameState === 'playing') {
@@ -1350,7 +2113,18 @@ function drawTitle() {
   const instrSpacing = Math.min(20, H*0.028);
   const btnH = Math.min(46, H*0.058);
 
+  // Apply scroll
+  ctx.save();
+  ctx.translate(0, -titleScrollY);
+
   let y = Math.max(10, H * 0.02);
+
+  // Coin display top right
+  ctx.fillStyle = '#ffd700';
+  ctx.font = `bold ${Math.min(14, W*0.028)}px sans-serif`;
+  ctx.textAlign = 'right';
+  ctx.fillText(`🪙 ${coinBalance}`, W - 15, y + 18);
+  ctx.textAlign = 'center';
 
   // Unicorn emoji
   ctx.font = `${36+Math.sin(t*2)*3}px sans-serif`;
@@ -1369,12 +2143,12 @@ function drawTitle() {
     const yOff = Math.sin(t*3+i*0.3)*3;
     ctx.fillText(title[i], startX+ctx.measureText(title.substring(0,i)).width+charW/2, y+titleSize+yOff);
   }
-  y += titleSize + 20;
+  y += titleSize + 14;
 
   // Instructions
   const instructions = [
     { icon: '👆', text: 'Drag to move! Collect rainbows!', color: '#4dc9ff' },
-    { icon: '⚡', text: 'Dodge clouds & stars — they slow you!', color: '#ff6b9d' },
+    { icon: '⚡', text: 'Dodge clouds & stars!', color: '#ff6b9d' },
     { icon: '🔥', text: 'Chain combos for multipliers!', color: '#ffd700' },
   ];
   instructions.forEach((inst, i) => {
@@ -1386,12 +2160,12 @@ function drawTitle() {
     ctx.fillText(`${inst.icon} ${inst.text}`, W/2, y + i*instrSpacing);
   });
   ctx.globalAlpha = 1;
-  y += instructions.length * instrSpacing + 12;
+  y += instructions.length * instrSpacing + 8;
 
   // Skin selector
   ctx.fillStyle = '#c9a0ff';
   ctx.font = `bold ${Math.min(12, W*0.024)}px sans-serif`;
-  ctx.fillText('🦄 Select Unicorn Skin', W/2, y);
+  ctx.fillText('🦄 Select Skin', W/2, y);
   y += 8;
 
   const skinSize = Math.min(32, W * 0.06);
@@ -1433,7 +2207,6 @@ function drawTitle() {
   });
   y += skinSize + 4;
 
-  // Progress toward next unlock
   const nextSkin = SKINS.find(s => !isSkinUnlocked(s));
   if (nextSkin) {
     ctx.fillStyle = '#888';
@@ -1444,13 +2217,13 @@ function drawTitle() {
     ctx.font = `${Math.min(10, W*0.02)}px sans-serif`;
     ctx.fillText(`All skins unlocked! Total: ${cumulativeScore} pts ⭐`, W/2, y + 10);
   }
-  y += 22;
+  y += 20;
 
   // Difficulty buttons
   ctx.fillStyle = '#c9a0ff';
   ctx.font = `bold ${Math.min(13,W*0.026)}px sans-serif`;
-  ctx.fillText('🌟 Pick your difficulty! 🌟', W/2, y);
-  y += 16;
+  ctx.fillText('🌟 Pick difficulty! 🌟', W/2, y);
+  y += 14;
 
   const btnY = y;
   const btnGap = 6;
@@ -1488,59 +2261,205 @@ function drawTitle() {
     ctx.fillText(d.label, bx+singleBtnW/2, by+btnH*0.72);
   });
 
-  // START + Daily buttons side by side
-  const startBtnW = Math.min(160, W*0.38);
-  const dailyBtnW = Math.min(160, W*0.38);
-  const btnRowW = startBtnW + 10 + dailyBtnW;
-  const startBtnH = Math.min(46, H*0.058);
-  const startBtnX = (W - btnRowW) / 2;
-  const startBtnY = btnY + btnH + 14;
-  _startBtn = { x: startBtnX, y: startBtnY, w: startBtnW, h: startBtnH };
+  // START + Daily + Endless buttons
+  const rowBtnW = Math.min(120, W*0.28);
+  const rowBtnH = Math.min(46, H*0.058);
+  const totalRowW = rowBtnW * 3 + 16;
+  const rowStartX = (W - totalRowW) / 2;
+  const rowY = btnY + btnH + 12;
 
+  // START
+  _startBtn = { x: rowStartX, y: rowY, w: rowBtnW, h: rowBtnH };
   const pulse = 0.8 + Math.sin(t*3)*0.2;
   ctx.shadowColor = '#4dff88'; ctx.shadowBlur = 15 * pulse;
-  const startGrad = ctx.createLinearGradient(startBtnX, startBtnY, startBtnX+startBtnW, startBtnY);
+  const startGrad = ctx.createLinearGradient(rowStartX, rowY, rowStartX+rowBtnW, rowY);
   startGrad.addColorStop(0, '#4dff88'); startGrad.addColorStop(1, '#00cc66');
   ctx.fillStyle = startGrad;
-  ctx.beginPath(); ctx.roundRect(startBtnX, startBtnY, startBtnW, startBtnH, startBtnH/2); ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#fff';
-  ctx.font = `bold ${Math.min(18, W*0.035)}px sans-serif`;
-  ctx.fillText('🏁 START!', startBtnX + startBtnW/2, startBtnY + startBtnH*0.65);
-
-  // Daily Challenge button
-  const dailyBtnX = startBtnX + startBtnW + 10;
-  _dailyBtn = { x: dailyBtnX, y: startBtnY, w: dailyBtnW, h: startBtnH };
-
-  ctx.shadowColor = '#ff9e4d'; ctx.shadowBlur = 12 * pulse;
-  const dailyGrad = ctx.createLinearGradient(dailyBtnX, startBtnY, dailyBtnX+dailyBtnW, startBtnY);
-  dailyGrad.addColorStop(0, '#ff9e4d'); dailyGrad.addColorStop(1, '#ff6b35');
-  ctx.fillStyle = dailyGrad;
-  ctx.beginPath(); ctx.roundRect(dailyBtnX, startBtnY, dailyBtnW, startBtnH, startBtnH/2); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(rowStartX, rowY, rowBtnW, rowBtnH, rowBtnH/2); ctx.fill();
   ctx.shadowBlur = 0;
   ctx.fillStyle = '#fff';
   ctx.font = `bold ${Math.min(15, W*0.03)}px sans-serif`;
-  ctx.fillText('📅 DAILY', dailyBtnX + dailyBtnW/2, startBtnY + startBtnH*0.65);
+  ctx.fillText('🏁 START', rowStartX + rowBtnW/2, rowY + rowBtnH*0.65);
+
+  // DAILY
+  const dailyX = rowStartX + rowBtnW + 8;
+  _dailyBtn = { x: dailyX, y: rowY, w: rowBtnW, h: rowBtnH };
+  ctx.shadowColor = '#ff9e4d'; ctx.shadowBlur = 12 * pulse;
+  const dailyGrad = ctx.createLinearGradient(dailyX, rowY, dailyX+rowBtnW, rowY);
+  dailyGrad.addColorStop(0, '#ff9e4d'); dailyGrad.addColorStop(1, '#ff6b35');
+  ctx.fillStyle = dailyGrad;
+  ctx.beginPath(); ctx.roundRect(dailyX, rowY, rowBtnW, rowBtnH, rowBtnH/2); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.min(15, W*0.03)}px sans-serif`;
+  ctx.fillText('📅 DAILY', dailyX + rowBtnW/2, rowY + rowBtnH*0.65);
+
+  // ENDLESS
+  const endlessX = dailyX + rowBtnW + 8;
+  _endlessBtn = { x: endlessX, y: rowY, w: rowBtnW, h: rowBtnH };
+  ctx.shadowColor = '#c44dff'; ctx.shadowBlur = 15 * pulse;
+  const endlessGrad = ctx.createLinearGradient(endlessX, rowY, endlessX+rowBtnW, rowY);
+  endlessGrad.addColorStop(0, '#c44dff'); endlessGrad.addColorStop(1, '#8b00ff');
+  ctx.fillStyle = endlessGrad;
+  ctx.beginPath(); ctx.roundRect(endlessX, rowY, rowBtnW, rowBtnH, rowBtnH/2); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.min(15, W*0.03)}px sans-serif`;
+  ctx.fillText('♾️ ENDLESS', endlessX + rowBtnW/2, rowY + rowBtnH*0.65);
+
+  // Shop button
+  const shopBtnW = Math.min(100, W*0.25);
+  const shopBtnX = (W - shopBtnW) / 2;
+  const shopBtnY = rowY + rowBtnH + 10;
+  _shopBtn = { x: shopBtnX, y: shopBtnY, w: shopBtnW, h: 36 };
+  ctx.fillStyle = '#e8a000';
+  ctx.beginPath(); ctx.roundRect(shopBtnX, shopBtnY, shopBtnW, 36, 18); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.min(14, W*0.028)}px sans-serif`;
+  ctx.fillText('🛍️ Shop', shopBtnX + shopBtnW/2, shopBtnY + 23);
+
+  // Purchased items display
+  if (purchasedItems.length > 0) {
+    ctx.fillStyle = '#4dff88';
+    ctx.font = `${Math.min(10, W*0.02)}px sans-serif`;
+    const pText = purchasedItems.map(id => shopItems.find(s=>s.id===id)?.icon || '').join(' ');
+    ctx.fillText(`Ready: ${pText}`, W/2, shopBtnY + 50);
+  }
+
+  const afterShopY = shopBtnY + (purchasedItems.length > 0 ? 58 : 42);
+
+  // Missions
+  ctx.fillStyle = '#ff9e4d';
+  ctx.font = `bold ${Math.min(13, W*0.026)}px sans-serif`;
+  ctx.fillText('🎯 Missions', W/2, afterShopY);
+  
+  missions.forEach((m, i) => {
+    const my = afterShopY + 14 + i * 16;
+    ctx.fillStyle = m.completed ? '#4dff88' : '#ccc';
+    ctx.font = `${Math.min(11, W*0.022)}px sans-serif`;
+    const check = m.completed ? '✅' : '⬜';
+    ctx.fillText(`${check} ${m.desc} (+25🪙)`, W/2, my);
+  });
+
+  const afterMissionsY = afterShopY + 14 + missions.length * 16 + 10;
 
   // Leaderboard
-  const scoresLbY = startBtnY + startBtnH + 16;
+  const scoresLbY = afterMissionsY;
+  
+  // LB tabs
+  const lbTabs = [...DIFFICULTY_ORDER, 'endless'];
+  const lbTabW = Math.min(50, (W - 20) / lbTabs.length - 2);
+  const lbTabStartX = (W - lbTabs.length * (lbTabW + 2)) / 2;
+  _lbTabBtns = [];
+  lbTabs.forEach((key, idx) => {
+    const tx = lbTabStartX + idx * (lbTabW + 2);
+    const ty = scoresLbY;
+    _lbTabBtns.push({ x: tx, y: ty, w: lbTabW, h: 22, key });
+    ctx.fillStyle = key === selectedDifficultyForLB ? '#ffd700' : '#444';
+    ctx.beginPath(); ctx.roundRect(tx, ty, lbTabW, 22, 6); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.min(9, lbTabW*0.22)}px sans-serif`;
+    const label = key === 'endless' ? '♾️' : (DIFFICULTIES[key]?.emoji || key);
+    ctx.fillText(label, tx + lbTabW/2, ty + 15);
+  });
+
   const lbScores = leaderboards[selectedDifficultyForLB] || [];
+  const lbTopY = scoresLbY + 28;
   if (lbScores.length > 0) {
     ctx.fillStyle = '#ffd700';
     ctx.font = `bold ${Math.min(14,W*0.028)}px sans-serif`;
-    ctx.fillText(`🏆 ${DIFFICULTIES[selectedDifficultyForLB].label} Top 10 🏆`, W/2, scoresLbY);
+    const lbLabel = selectedDifficultyForLB === 'endless' ? 'Endless' : DIFFICULTIES[selectedDifficultyForLB].label;
+    ctx.fillText(`🏆 ${lbLabel} Top 10 🏆`, W/2, lbTopY);
     const lbSize = Math.min(11, W*0.022);
     ctx.font = `${lbSize}px sans-serif`;
     lbScores.slice(0,10).forEach((s,i) => {
       const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'⭐';
       ctx.fillStyle = i<3?'#ffd700':'#ccc';
-      ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, scoresLbY+14+i*(lbSize+3));
+      ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, lbTopY+14+i*(lbSize+3));
     });
+    y = lbTopY + 14 + Math.min(lbScores.length, 10) * (Math.min(11, W*0.022) + 3) + 20;
   } else {
     ctx.fillStyle = '#888';
     ctx.font = `${Math.min(12,W*0.024)}px sans-serif`;
-    ctx.fillText('No scores yet — be the first! 🌟', W/2, scoresLbY + 10);
+    ctx.fillText('No scores yet — be the first! 🌟', W/2, lbTopY + 10);
+    y = lbTopY + 30;
   }
+
+  // Track max scroll
+  titleMaxScroll = Math.max(0, y - H + 20);
+
+  ctx.restore(); // end scroll transform
+}
+
+// --- Draw Shop ---
+function drawShop() {
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#1a0a2e'); grad.addColorStop(1, '#2d1050');
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+
+  ctx.fillStyle = '#ffd700';
+  ctx.font = `bold ${Math.min(28, W*0.05)}px sans-serif`;
+  ctx.fillText('🛍️ Shop', W/2, 40);
+
+  ctx.fillStyle = '#ffd700';
+  ctx.font = `bold ${Math.min(18, W*0.035)}px sans-serif`;
+  ctx.fillText(`🪙 ${coinBalance}`, W/2, 65);
+
+  _shopItemBtns = [];
+  const cardW = Math.min(160, (W - 40) / 2 - 10);
+  const cardH = 110;
+  const cols = cardW * 2 + 20 <= W - 20 ? 2 : 1;
+  const gridW = cols * cardW + (cols - 1) * 10;
+  const gridStartX = (W - gridW) / 2;
+
+  shopItems.forEach((item, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const cx = gridStartX + col * (cardW + 10);
+    const cy = 85 + row * (cardH + 10);
+    _shopItemBtns.push({ x: cx, y: cy, w: cardW, h: cardH, item });
+
+    const owned = purchasedItems.includes(item.id);
+    const canAfford = coinBalance >= item.price;
+
+    ctx.fillStyle = owned ? '#1a3a1a' : canAfford ? '#2a1a4a' : '#1a1a2a';
+    ctx.strokeStyle = owned ? '#4dff88' : canAfford ? '#c9a0ff' : '#444';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.roundRect(cx, cy, cardW, cardH, 12); ctx.fill(); ctx.stroke();
+
+    ctx.font = `${Math.min(28, cardW*0.2)}px sans-serif`;
+    ctx.fillStyle = '#fff';
+    ctx.fillText(item.icon, cx + cardW/2, cy + 30);
+
+    ctx.font = `bold ${Math.min(13, cardW*0.1)}px sans-serif`;
+    ctx.fillStyle = '#fff';
+    ctx.fillText(item.name, cx + cardW/2, cy + 50);
+
+    ctx.font = `${Math.min(10, cardW*0.07)}px sans-serif`;
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(item.desc, cx + cardW/2, cy + 65);
+
+    if (owned) {
+      ctx.fillStyle = '#4dff88';
+      ctx.font = `bold ${Math.min(13, cardW*0.1)}px sans-serif`;
+      ctx.fillText('✅ READY', cx + cardW/2, cy + 90);
+    } else {
+      ctx.fillStyle = canAfford ? '#ffd700' : '#666';
+      ctx.font = `bold ${Math.min(13, cardW*0.1)}px sans-serif`;
+      ctx.fillText(`🪙 ${item.price}`, cx + cardW/2, cy + 90);
+    }
+  });
+
+  // Back button
+  const backW = 100;
+  const backY = H - 60;
+  _shopBackBtn = { x: (W-backW)/2, y: backY, w: backW, h: 40 };
+  ctx.fillStyle = '#444';
+  ctx.beginPath(); ctx.roundRect((W-backW)/2, backY, backW, 40, 20); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = `bold ${Math.min(15, W*0.03)}px sans-serif`;
+  ctx.fillText('← Back', W/2, backY + 26);
 }
 
 // --- Draw Win Screen ---
@@ -1627,7 +2546,7 @@ function drawWinScreen() {
 
     const wColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
     ctx.font = `bold ${Math.min(40,W*0.07)}px sans-serif`;
-    const msg = 'YOU DID IT!';
+    const msg = gameMode === 'endless' ? 'GAME OVER!' : 'YOU DID IT!';
     const mw = ctx.measureText(msg);
     const msx = W/2-mw.width/2;
     for (let i = 0; i < msg.length; i++) {
@@ -1639,45 +2558,55 @@ function drawWinScreen() {
 
     ctx.fillStyle = '#fff';
     ctx.font = `${Math.min(22,W*0.04)}px sans-serif`;
-    ctx.fillText(`You collected ${score} rainbow points! ✨`, W/2, H*0.41);
+    if (gameMode === 'endless') {
+      ctx.fillText(`Distance: ${Math.floor(distance)}m | Score: ${score} ✨`, W/2, H*0.41);
+    } else {
+      ctx.fillText(`You collected ${score} rainbow points! ✨`, W/2, H*0.41);
+    }
 
-    // Show cumulative + unlocks
+    // Coins earned
+    const bonusCoins = Math.floor(score / 100);
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `${Math.min(14,W*0.028)}px sans-serif`;
+    ctx.fillText(`🪙 +${coinsCollectedThisRun} collected +${bonusCoins} bonus = ${coinsCollectedThisRun + bonusCoins} coins`, W/2, H*0.46);
+
     ctx.fillStyle = '#c9a0ff';
     ctx.font = `${Math.min(14,W*0.028)}px sans-serif`;
-    ctx.fillText(`Lifetime total: ${cumulativeScore} pts`, W/2, H*0.46);
+    ctx.fillText(`Lifetime total: ${cumulativeScore} pts`, W/2, H*0.50);
 
-    const minTop10 = leaderboard.length >= 10 ? leaderboard[leaderboard.length-1].score : 0;
-    if (window._nameSubmitted || (score <= minTop10 && leaderboard.length >= 10)) {
+    const lb = leaderboard;
+    const minTop10 = lb.length >= 10 ? lb[lb.length-1].score : 0;
+    if (window._nameSubmitted || (score <= minTop10 && lb.length >= 10)) {
       if (!window._nameSubmitted && score <= minTop10) {
         ctx.fillStyle = '#c9a0ff';
         ctx.font = `${Math.min(16,W*0.03)}px sans-serif`;
-        ctx.fillText(`Top 10 starts at ${minTop10} — keep trying! 🌟`, W/2, H*0.50);
+        ctx.fillText(`Top 10 starts at ${minTop10} — keep trying! 🌟`, W/2, H*0.54);
       }
     }
 
-    const allScores = leaderboard;
+    const allScores = lb;
     if (allScores.length > 0) {
       ctx.fillStyle = '#ffd700';
       ctx.font = `bold ${Math.min(16,W*0.032)}px sans-serif`;
-      ctx.fillText('🏆 Top 10 🏆', W/2, H*0.56);
+      ctx.fillText('🏆 Top 10 🏆', W/2, H*0.60);
       const lbS = Math.min(13,W*0.026);
       ctx.font = `${lbS}px sans-serif`;
       allScores.slice(0,10).forEach((s,i) => {
         const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'⭐';
         ctx.fillStyle = i<3?'#ffd700':'#ccc';
-        ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, H*0.56+18+i*(lbS+5));
+        ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, H*0.60+18+i*(lbS+5));
       });
     }
 
     ctx.font = '26px sans-serif';
-    ctx.fillText('🎉 🦄 🌈 ⭐ 💖 🎉', W/2, H*0.87);
+    ctx.fillText('🎉 🦄 🌈 ⭐ 💖 🎉', W/2, H*0.90);
 
     if (winTime > 2) {
       const pulse2 = 0.7+Math.sin(winTime*3)*0.3;
       ctx.globalAlpha = pulse2;
       ctx.fillStyle = '#ffd700';
       ctx.font = `bold ${Math.min(22,W*0.04)}px sans-serif`;
-      ctx.fillText('🌟 Tap to Race Again! 🌟', W/2, H*0.93);
+      ctx.fillText('🌟 Tap to Play Again! 🌟', W/2, H*0.95);
       ctx.globalAlpha = 1;
     }
   }
@@ -1688,6 +2617,7 @@ function draw() {
   ctx.clearRect(0, 0, W, H);
 
   if (gameState === 'title') { drawTitle(); return; }
+  if (gameState === 'shop') { drawShop(); return; }
   if (gameState === 'win') { drawWinScreen(); return; }
 
   // Screen shake
@@ -1718,6 +2648,16 @@ function draw() {
   // Draw items on screen
   const viewRange = 600;
 
+  // Ghost unicorn (race mode only)
+  if (gameMode === 'race' && ghostData && ghostData.positions && ghostVisible) {
+    const checkpoint = Math.floor(distance / 100);
+    if (checkpoint >= 0 && checkpoint < ghostData.positions.length) {
+      const ghostX = ghostData.positions[checkpoint] * W;
+      const ghostY = H * 0.72;
+      drawGhostUnicorn(ghostX, ghostY);
+    }
+  }
+
   // Rainbows
   trackRainbows.forEach((rb, i) => {
     if (collectedSet.has(i)) return;
@@ -1730,6 +2670,17 @@ function draw() {
     }
     const bob = Math.sin(Date.now()/400 + i) * 5;
     drawRainbow(screenX, screenY + bob, rb.type);
+  });
+
+  // Coins
+  trackCoins.forEach((c, i) => {
+    if (collectedCoins.has(i)) return;
+    const relY = (c.y - distance) / viewRange;
+    if (relY < -0.05 || relY > 1.05) return;
+    const screenY = H * (1 - relY * 0.85 - 0.08);
+    const screenX = c.x * W;
+    const bob = Math.sin(Date.now()/350 + i*2) * 4;
+    drawCoin(screenX, screenY + bob);
   });
 
   // Obstacles
@@ -1753,11 +2704,13 @@ function draw() {
     drawPowerUpItem(screenX, screenY + bob, pu);
   });
 
-  // Finish rainbow
-  const finishRelY = (TRACK_LENGTH - distance) / viewRange;
-  const finishBaseY = H * 0.72 - finishRelY * H * 0.85;
-  if (finishBaseY > -W*0.5 && finishBaseY < H + 50) {
-    drawFinishRainbow(finishBaseY);
+  // Finish rainbow (race mode)
+  if (gameMode === 'race') {
+    const finishRelY = (currentTrackLength - distance) / viewRange;
+    const finishBaseY = H * 0.72 - finishRelY * H * 0.85;
+    if (finishBaseY > -W*0.5 && finishBaseY < H + 50) {
+      drawFinishRainbow(finishBaseY);
+    }
   }
 
   // Draw unicorn

@@ -7,9 +7,10 @@ let scoresByDifficulty = {
   hard: [],
   extreme: [],
   crazy: [],
+  endless: [],
 };
 const MAX_SCORES = 50;
-const VALID_DIFFICULTIES = ['easy', 'medium', 'hard', 'extreme', 'crazy'];
+const VALID_DIFFICULTIES = ['easy', 'medium', 'hard', 'extreme', 'crazy', 'endless'];
 
 function getDifficulty(req) {
   const d = (req.query?.difficulty || req.body?.difficulty || 'easy').toLowerCase();
