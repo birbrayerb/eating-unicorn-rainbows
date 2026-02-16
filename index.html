@@ -2334,13 +2334,13 @@ function drawTitle() {
     ctx.fillText(`${check} ${m.desc} (+25🪙)`, W/2, my);
   });
 
-  const afterMissionsY = afterShopY + 18 + missions.length * 18 + 20;
+  const afterMissionsY = afterShopY + 18 + missions.length * 18 + 28;
 
   // Leaderboard
   ctx.fillStyle = '#ffd700';
   ctx.font = `bold ${Math.min(14, W*0.028)}px sans-serif`;
   ctx.fillText('🏆 Leaderboards 🏆', W/2, afterMissionsY);
-  const scoresLbY = afterMissionsY + 16;
+  const scoresLbY = afterMissionsY + 18;
   
   // LB tabs
   const lbTabs = [...DIFFICULTY_ORDER];
@@ -2365,15 +2365,15 @@ function drawTitle() {
     ctx.fillStyle = '#ffd700';
     ctx.font = `bold ${Math.min(14,W*0.028)}px sans-serif`;
     const lbLabel = selectedDifficultyForLB === 'endless' ? 'Endless' : DIFFICULTIES[selectedDifficultyForLB].label;
-    ctx.fillText(`🏆 ${lbLabel} Top 10 🏆`, W/2, lbTopY);
-    const lbSize = Math.min(11, W*0.022);
-    ctx.font = `${lbSize}px sans-serif`;
-    lbScores.slice(0,10).forEach((s,i) => {
-      const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'⭐';
-      ctx.fillStyle = i<3?'#ffd700':'#ccc';
-      ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, lbTopY+14+i*(lbSize+3));
+    ctx.fillText(`🏆 ${lbLabel} Top 3 🏆`, W/2, lbTopY);
+    const lbSize = Math.min(13, W*0.026);
+    ctx.font = `bold ${lbSize}px sans-serif`;
+    lbScores.slice(0,3).forEach((s,i) => {
+      const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
+      ctx.fillStyle = '#ffd700';
+      ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, lbTopY+18+i*(lbSize+6));
     });
-    y = lbTopY + 14 + Math.min(lbScores.length, 10) * (Math.min(11, W*0.022) + 3) + 20;
+    y = lbTopY + 18 + Math.min(lbScores.length, 3) * (lbSize + 6) + 20;
   } else {
     ctx.fillStyle = '#888';
     ctx.font = `${Math.min(12,W*0.024)}px sans-serif`;
