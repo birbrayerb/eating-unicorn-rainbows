@@ -73,31 +73,36 @@ function seededRandom(seed) {
   };
 }
 
+// --- Difficulty Levels ---
+const DIFFICULTIES = {
+  easy:    { label: 'Easy',    emoji: '🌸', speed: 125, spacing: 60,  hitMult: 1.0,  seed: 42069, color: '#ffb6d9', bg: '#ff69b4', sway: false },
+  medium:  { label: 'Medium',  emoji: '⭐', speed: 160, spacing: 75,  hitMult: 0.85, seed: 31337, color: '#b69fff', bg: '#7c4dff', sway: false },
+  hard:    { label: 'Hard',    emoji: '🔥', speed: 200, spacing: 90,  hitMult: 0.7,  seed: 80085, color: '#ffb347', bg: '#ff6b35', sway: false },
+  extreme: { label: 'Extreme', emoji: '💀', speed: 250, spacing: 110, hitMult: 0.55, seed: 66642, color: '#ff4444', bg: '#8b0000', sway: false },
+  crazy:   { label: 'Crazy',   emoji: '🤯', speed: 320, spacing: 130, hitMult: 0.4,  seed: 99999, color: '#ff00ff', bg: '#222',    sway: true  },
+};
+const DIFFICULTY_ORDER = ['easy','medium','hard','extreme','crazy'];
+let currentDifficulty = 'easy';
+let selectedDifficultyForLB = 'easy'; // which difficulty's leaderboard to show on title
+
 // --- Track Generation ---
 const TRACK_LENGTH = 10000;
-const TRACK_SEED = 42069;
-let trackRainbows = []; // {y, x, type} - y is distance along track (0=start, TRACK_LENGTH=end)
+let trackRainbows = [];
 
 function generateTrack() {
-  const rng = seededRandom(TRACK_SEED);
+  const diff = DIFFICULTIES[currentDifficulty];
+  const rng = seededRandom(diff.seed);
   trackRainbows = [];
-  // Place rainbows along the track
-  // Small rainbows: frequent, big: occasional, gold: rare
-  for (let y = 200; y < TRACK_LENGTH - 200; y += 60) {
+  for (let y = 200; y < TRACK_LENGTH - 200; y += diff.spacing) {
     const r = rng();
     if (r < 0.45) {
-      // small rainbow (10 pts) — most common
-      trackRainbows.push({ y, x: rng() * 0.8 + 0.1, type: 'small', points: 10 });
+      trackRainbows.push({ y, x: rng() * 0.8 + 0.1, type: 'small', points: 10, swayOffset: rng()*Math.PI*2 });
     } else if (r < 0.58) {
-      // big rainbow (50 pts)
-      trackRainbows.push({ y, x: rng() * 0.8 + 0.1, type: 'big', points: 50 });
+      trackRainbows.push({ y, x: rng() * 0.8 + 0.1, type: 'big', points: 50, swayOffset: rng()*Math.PI*2 });
     } else if (r < 0.62) {
-      // gold rainbow (100 pts)
-      trackRainbows.push({ y, x: rng() * 0.8 + 0.1, type: 'gold', points: 100 });
+      trackRainbows.push({ y, x: rng() * 0.8 + 0.1, type: 'gold', points: 100, swayOffset: rng()*Math.PI*2 });
     }
-    // else: empty space
   }
-  // Also generate some star decorations (non-collectible background)
   trackStars = [];
   for (let y = 0; y < TRACK_LENGTH; y += 30) {
     if (rng() < 0.3) {
@@ -114,11 +119,14 @@ let showingNameEntry = false;
 let pendingScore = 0;
 let nameInput = '';
 
-async function fetchLeaderboard() {
+let leaderboards = { easy:[], medium:[], hard:[], extreme:[], crazy:[] };
+
+async function fetchLeaderboard(diff) {
+  diff = diff || selectedDifficultyForLB;
   try {
-    const r = await fetch('/api/scores');
+    const r = await fetch(`/api/scores?difficulty=${diff}`);
     const d = await r.json();
-    if (d.scores) leaderboard = d.scores;
+    if (d.scores) { leaderboards[diff] = d.scores; leaderboard = leaderboards[diff]; }
   } catch(e) { console.log('Leaderboard offline'); }
 }
 
@@ -126,14 +134,14 @@ async function submitScore(name, sc) {
   try {
     const r = await fetch('/api/scores', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, score: sc })
+      body: JSON.stringify({ name, score: sc, difficulty: currentDifficulty })
     });
     const d = await r.json();
-    if (d.scores) leaderboard = d.scores;
+    if (d.scores) { leaderboards[currentDifficulty] = d.scores; leaderboard = d.scores; }
   } catch(e) { console.log('Could not submit score'); }
 }
 
-fetchLeaderboard();
+fetchLeaderboard('easy');
 
 // --- Game State ---
 let gameState = 'title'; // title, playing, win
@@ -143,8 +151,8 @@ let titleTime = 0;
 let winTime = 0;
 let collectedSet = new Set(); // indices of collected rainbows
 
-// Speed: units per second. TRACK_LENGTH=10000, ~80 seconds
-const BASE_SPEED = 125;
+// Speed: from difficulty settings
+function getSpeed() { return DIFFICULTIES[currentDifficulty].speed; }
 
 // --- Unicorn ---
 const unicorn = {
@@ -213,11 +221,10 @@ document.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
 canvas.addEventListener('pointerdown', e => {
   initAudio();
-  if (gameState === 'title') { startGame(); return; }
+  if (gameState === 'title') { handleTitleClick(e.clientX, e.clientY); return; }
   if (gameState === 'win') {
     if (showingNameEntry) { handleNameClick(e.clientX, e.clientY); return; }
     if (winTime > 2) { resetToTitle(); return; }
-    return;
   }
   // Playing: unicorn follows finger horizontally
   touchTargetX = e.clientX;
@@ -262,6 +269,31 @@ function finishNameEntry() {
   playChime(800, 0.3, 0.1);
 }
 
+// --- Title Screen Click ---
+let _diffBtns = []; // stored by drawTitle for hit detection
+let _lbTabBtns = []; // leaderboard tab buttons
+
+function handleTitleClick(cx, cy) {
+  // Check difficulty buttons
+  for (const btn of _diffBtns) {
+    if (cx >= btn.x && cx <= btn.x+btn.w && cy >= btn.y && cy <= btn.y+btn.h) {
+      currentDifficulty = btn.key;
+      selectedDifficultyForLB = btn.key;
+      startGame();
+      return;
+    }
+  }
+  // Check leaderboard tab buttons
+  for (const btn of _lbTabBtns) {
+    if (cx >= btn.x && cx <= btn.x+btn.w && cy >= btn.y && cy <= btn.y+btn.h) {
+      selectedDifficultyForLB = btn.key;
+      leaderboard = leaderboards[btn.key] || [];
+      fetchLeaderboard(btn.key);
+      return;
+    }
+  }
+}
+
 // --- Game Flow ---
 function startGame() {
   gameState = 'playing';
@@ -277,7 +309,8 @@ function resetToTitle() {
   gameState = 'title'; titleTime = 0;
   stopMelody();
   particles = []; fireworks = [];
-  fetchLeaderboard();
+  selectedDifficultyForLB = currentDifficulty;
+  fetchLeaderboard(currentDifficulty);
 }
 
 // --- Update ---
@@ -296,7 +329,7 @@ function update(dt) {
 
   // --- Playing ---
   // Move forward
-  distance += BASE_SPEED * dt;
+  distance += getSpeed() * dt;
 
   // Check win
   if (distance >= TRACK_LENGTH) {
@@ -366,13 +399,17 @@ function update(dt) {
 
     const screenRbY = H * (1 - relY * 0.85 - 0.08);
     const unicornScreenY = H * 0.72;
-    const screenRbX = rb.x * W;
+    let screenRbX = rb.x * W;
+    if (DIFFICULTIES[currentDifficulty].sway) {
+      screenRbX += Math.sin(Date.now()/500 + rb.swayOffset) * 40;
+    }
     const unicornScreenX = unicorn.x * W;
 
     const dx = screenRbX - unicornScreenX;
     const dyScreen = screenRbY - unicornScreenY;
     const dist = Math.sqrt(dx*dx + dyScreen*dyScreen);
-    const hitRadius = rb.type === 'big' ? 45 : rb.type === 'gold' ? 40 : 35;
+    const hm = DIFFICULTIES[currentDifficulty].hitMult;
+    const hitRadius = (rb.type === 'big' ? 45 : rb.type === 'gold' ? 40 : 35) * hm;
 
     if (dist < hitRadius) {
       collectedSet.add(i);
@@ -393,7 +430,7 @@ function update(dt) {
 
   // Clouds scroll
   bgClouds.forEach(c => {
-    c.y += BASE_SPEED * dt * 0.3;
+    c.y += getSpeed() * dt * 0.3;
     if (c.y > H + 100) { c.y = -100; c.x = Math.random(); }
   });
 }
@@ -661,11 +698,18 @@ function drawPlayBackground() {
 function drawHUD() {
   const progress = distance / TRACK_LENGTH;
 
+  // Difficulty label (top left)
+  const diff = DIFFICULTIES[currentDifficulty];
+  ctx.fillStyle = diff.color;
+  ctx.font = `bold ${Math.min(13, W*0.025)}px sans-serif`;
+  ctx.textAlign = 'left';
+  ctx.fillText(`${diff.emoji} ${diff.label}`, 15, 18);
+
   // Score (top left)
   ctx.fillStyle = '#ffd700';
   ctx.font = `bold ${Math.min(22, W*0.04)}px sans-serif`;
   ctx.textAlign = 'left';
-  ctx.fillText(`✨ ${score}`, 15, 32);
+  ctx.fillText(`✨ ${score}`, 15, 42);
 
   // Progress bar (right side, vertical)
   const barH = H * 0.6;
@@ -788,28 +832,89 @@ function drawTitle() {
   });
   ctx.globalAlpha = 1;
 
-  // Leaderboard
-  const lbY = instrStartY + instructions.length*instrSpacing + 20;
-  if (leaderboard.length > 0) {
+  // Difficulty buttons
+  const btnY = instrStartY + instructions.length*instrSpacing + 15;
+  const btnH = Math.min(48, H*0.06);
+  const btnGap = 8;
+  const totalBtnW = Math.min(W*0.92, 520);
+  const singleBtnW = (totalBtnW - btnGap*(DIFFICULTY_ORDER.length-1)) / DIFFICULTY_ORDER.length;
+  const btnStartX = (W - totalBtnW) / 2;
+
+  ctx.fillStyle = '#c9a0ff';
+  ctx.font = `bold ${Math.min(14,W*0.028)}px sans-serif`;
+  ctx.fillText('🌟 Pick your difficulty! 🌟', W/2, btnY - 6);
+
+  _diffBtns = [];
+  DIFFICULTY_ORDER.forEach((key, idx) => {
+    const d = DIFFICULTIES[key];
+    const bx = btnStartX + idx * (singleBtnW + btnGap);
+    const by = btnY;
+    _diffBtns.push({ x: bx, y: by, w: singleBtnW, h: btnH, key });
+
+    // Button bg
+    if (key === 'crazy') {
+      // Rainbow flashing
+      const hue = (Date.now()/10 + idx*60) % 360;
+      ctx.fillStyle = `hsl(${hue}, 100%, 50%)`;
+    } else {
+      ctx.fillStyle = d.bg;
+    }
+    ctx.shadowColor = d.color; ctx.shadowBlur = 8;
+    ctx.beginPath(); ctx.roundRect(bx, by, singleBtnW, btnH, 12); ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Border if selected for LB
+    if (key === selectedDifficultyForLB) {
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(bx, by, singleBtnW, btnH, 12); ctx.stroke();
+    }
+
+    // Label
+    ctx.fillStyle = '#fff';
+    const labelSize = Math.min(11, singleBtnW*0.22);
+    ctx.font = `bold ${labelSize}px sans-serif`;
+    ctx.fillText(d.emoji, bx+singleBtnW/2, by+btnH*0.38);
+    ctx.font = `bold ${Math.max(8, labelSize-1)}px sans-serif`;
+    ctx.fillText(d.label, bx+singleBtnW/2, by+btnH*0.72);
+  });
+
+  // Leaderboard tabs
+  const lbY = btnY + btnH + 20;
+  _lbTabBtns = [];
+  const tabW = Math.min(60, W*0.12);
+  const tabH = 22;
+  const tabTotalW = DIFFICULTY_ORDER.length * (tabW+4);
+  const tabStartX = (W - tabTotalW)/2;
+  DIFFICULTY_ORDER.forEach((key, idx) => {
+    const d = DIFFICULTIES[key];
+    const tx = tabStartX + idx*(tabW+4);
+    const ty = lbY;
+    _lbTabBtns.push({ x: tx, y: ty, w: tabW, h: tabH, key });
+    ctx.fillStyle = key === selectedDifficultyForLB ? d.bg : 'rgba(255,255,255,0.1)';
+    ctx.beginPath(); ctx.roundRect(tx, ty, tabW, tabH, 6); ctx.fill();
+    ctx.fillStyle = key === selectedDifficultyForLB ? '#fff' : '#888';
+    ctx.font = `bold ${Math.min(10,tabW*0.18)}px sans-serif`;
+    ctx.fillText(`${d.emoji}`, tx+tabW/2, ty+tabH*0.7);
+  });
+
+  const scoresLbY = lbY + tabH + 8;
+  const lbScores = leaderboards[selectedDifficultyForLB] || [];
+  if (lbScores.length > 0) {
     ctx.fillStyle = '#ffd700';
-    ctx.font = `bold ${Math.min(18,W*0.035)}px sans-serif`;
-    ctx.fillText('🏆 Top 10 Scores 🏆', W/2, lbY);
-    const lbSize = Math.min(13, W*0.026);
+    ctx.font = `bold ${Math.min(15,W*0.03)}px sans-serif`;
+    ctx.fillText(`🏆 ${DIFFICULTIES[selectedDifficultyForLB].label} Top 10 🏆`, W/2, scoresLbY);
+    const lbSize = Math.min(12, W*0.024);
     ctx.font = `${lbSize}px sans-serif`;
-    leaderboard.slice(0,10).forEach((s,i) => {
+    lbScores.slice(0,10).forEach((s,i) => {
       const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'⭐';
       ctx.fillStyle = i<3?'#ffd700':'#ccc';
-      ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, lbY+18+i*(lbSize+5));
+      ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, scoresLbY+16+i*(lbSize+4));
     });
+  } else {
+    ctx.fillStyle = '#888';
+    ctx.font = `${Math.min(13,W*0.026)}px sans-serif`;
+    ctx.fillText('No scores yet — be the first! 🌟', W/2, scoresLbY + 10);
   }
-
-  // Tap to play
-  const pulse = 0.7+Math.sin(t*3)*0.3;
-  ctx.globalAlpha = pulse;
-  ctx.fillStyle = '#ffd700';
-  ctx.font = `bold ${Math.min(28,W*0.05)}px sans-serif`;
-  ctx.fillText('🌟 Tap to Race! 🌟', W/2, H*0.92);
-  ctx.globalAlpha = 1;
 }
 
 // --- Draw Win Screen ---
@@ -990,7 +1095,10 @@ function draw() {
     const relY = (rb.y - distance) / viewRange;
     if (relY < -0.05 || relY > 1.05) return;
     const screenY = H * (1 - relY * 0.85 - 0.08);
-    const screenX = rb.x * W;
+    let screenX = rb.x * W;
+    if (DIFFICULTIES[currentDifficulty].sway) {
+      screenX += Math.sin(Date.now()/500 + rb.swayOffset) * 40;
+    }
     const bob = Math.sin(Date.now()/400 + i) * 5;
     drawRainbow(screenX, screenY + bob, rb.type);
   });
