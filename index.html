@@ -859,8 +859,7 @@ function drawWinScreen() {
     ctx.shadowBlur = 0;
     ctx.fillStyle = nameInput ? '#2d1b4e' : '#bbb';
     ctx.font = `bold ${Math.min(26,W*0.045)}px sans-serif`;
-    const cursor = Math.sin(winTime*5)>0 ? '|' : '';
-    ctx.fillText(nameInput ? nameInput+cursor : 'Type here...', W/2, boxY+boxH/2+9);
+    ctx.fillText(nameInput ? nameInput : 'Type your name!', W/2, boxY+boxH/2+9);
 
     // Keyboard
     const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
