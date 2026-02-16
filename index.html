@@ -157,7 +157,21 @@ document.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 canvas.addEventListener('pointerdown', e => {
   initAudio();
   if (gameState === 'title') { startGame(); return; }
-  if (gameState === 'win' || gameState === 'lose') { if (winTime > 2) { resetToTitle(); } return; }
+  if (gameState === 'win' || gameState === 'lose') {
+    if (showingNameEntry) {
+      handleNameClick(e.clientX, e.clientY);
+      return;
+    }
+    if (gameState === 'win' && winTime > 1.5 && !showingNameEntry && !window._nameSubmitted) {
+      // Show name entry
+      showingNameEntry = true;
+      pendingScore = score;
+      nameInput = '';
+      return;
+    }
+    if (winTime > 2 && window._nameSubmitted) { window._nameSubmitted = false; resetToTitle(); }
+    return;
+  }
   mouseTarget = { x: e.clientX, y: e.clientY };
   touching = true;
 });
@@ -230,6 +244,63 @@ function spawnFirework(x, y) {
     });
   }
 }
+
+// --- Name Entry Click Handler ---
+function handleNameClick(cx, cy) {
+  const kb = window._nameKB;
+  if (!kb) return;
+  const { letters, btnSize, btnPad, rowLen, kbStartX, kbStartY, ctrlY, ctrlBtnW } = kb;
+
+  // Check letter buttons
+  for (let i = 0; i < letters.length; i++) {
+    const row = Math.floor(i / rowLen);
+    const col = i % rowLen;
+    const bx = kbStartX + col * (btnSize + btnPad);
+    const by = kbStartY + row * (btnSize + btnPad);
+    if (cx >= bx && cx <= bx+btnSize && cy >= by && cy <= by+btnSize) {
+      if (nameInput.length < 12) {
+        nameInput += letters[i];
+        playChime(400 + i*20, 0.1, 0.08);
+      }
+      return;
+    }
+  }
+
+  // Delete button
+  if (cx >= W/2 - ctrlBtnW - 10 && cx <= W/2 - 10 && cy >= ctrlY && cy <= ctrlY + btnSize + 4) {
+    nameInput = nameInput.slice(0, -1);
+    playChime(300, 0.1, 0.06);
+    return;
+  }
+
+  // Done button
+  if (cx >= W/2 + 10 && cx <= W/2 + 10 + ctrlBtnW && cy >= ctrlY && cy <= ctrlY + btnSize + 4) {
+    if (nameInput.length > 0) {
+      submitScore(nameInput, pendingScore);
+      showingNameEntry = false;
+      window._nameSubmitted = true;
+      winTime = 0; // reset so they see the win screen with leaderboard
+      playChime(800, 0.3, 0.1);
+    }
+    return;
+  }
+}
+
+// Also support physical keyboard for name entry
+document.addEventListener('keydown', e => {
+  if (!showingNameEntry) return;
+  if (e.key === 'Backspace') { nameInput = nameInput.slice(0, -1); e.preventDefault(); return; }
+  if (e.key === 'Enter' && nameInput.length > 0) {
+    submitScore(nameInput, pendingScore);
+    showingNameEntry = false;
+    window._nameSubmitted = true;
+    winTime = 0;
+    return;
+  }
+  if (/^[a-zA-Z0-9 ]$/.test(e.key) && nameInput.length < 12) {
+    nameInput += e.key.toUpperCase();
+  }
+});
 
 // --- Game Flow ---
 function startGame() {
@@ -811,57 +882,93 @@ function drawHUD() {
 function drawTitle() {
   drawBackground();
 
-  // Title text with rainbow
   const t = titleTime;
   ctx.save();
   ctx.textAlign = 'center';
 
   // Big unicorn emoji
-  ctx.font = `${60 + Math.sin(t*2)*5}px sans-serif`;
-  ctx.fillText('🦄', W/2, H*0.28);
+  ctx.font = `${50 + Math.sin(t*2)*4}px sans-serif`;
+  ctx.fillText('🦄', W/2, H*0.13);
 
-  // Title
+  // Title with rainbow letters
   const title = 'Eating Unicorn Rainbows';
-  ctx.font = `bold ${Math.min(42, W*0.07)}px sans-serif`;
-  // Rainbow text
+  const titleSize = Math.min(34, W*0.06);
+  ctx.font = `bold ${titleSize}px sans-serif`;
+  const colors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
   const metrics = ctx.measureText(title);
   const startX = W/2 - metrics.width/2;
-  const colors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
   for (let i = 0; i < title.length; i++) {
-    const c = colors[Math.floor((i + t*3) % colors.length)];
-    ctx.fillStyle = c;
+    ctx.fillStyle = colors[Math.floor((i + t*3) % colors.length)];
     const charW = ctx.measureText(title[i]).width;
-    const yOff = Math.sin(t*3 + i*0.3) * 5;
-    ctx.fillText(title[i], startX + ctx.measureText(title.substring(0,i)).width + charW/2, H*0.42 + yOff);
+    const yOff = Math.sin(t*3 + i*0.3) * 4;
+    ctx.fillText(title[i], startX + ctx.measureText(title.substring(0,i)).width + charW/2, H*0.22 + yOff);
   }
 
   // Sparkles around title
-  for (let i = 0; i < 12; i++) {
-    const a = t*0.5 + i*(Math.PI*2/12);
-    const r = 140 + Math.sin(t*2+i)*20;
+  for (let i = 0; i < 8; i++) {
+    const a = t*0.5 + i*(Math.PI*2/8);
+    const r = 120 + Math.sin(t*2+i)*15;
     const sx = W/2 + Math.cos(a)*r;
-    const sy = H*0.38 + Math.sin(a)*r*0.3;
-    ctx.globalAlpha = 0.5 + Math.sin(t*4+i)*0.3;
-    drawStar(sx, sy, 4+Math.sin(t*3+i)*2, 4, colors[i%colors.length]);
+    const sy = H*0.19 + Math.sin(a)*r*0.2;
+    ctx.globalAlpha = 0.4 + Math.sin(t*4+i)*0.3;
+    drawStar(sx, sy, 3+Math.sin(t*3+i)*2, 4, colors[i%colors.length]);
   }
   ctx.globalAlpha = 1;
 
-  // Subtitle
-  ctx.fillStyle = '#fff';
-  ctx.font = `${Math.min(22, W*0.04)}px sans-serif`;
-  ctx.fillText('A Magical Rainbow Adventure!', W/2, H*0.52);
+  // --- HOW TO PLAY instructions (animated, one at a time fading in) ---
+  const instructions = [
+    { icon: '🦄', text: 'Tap where you want to go!', color: '#ff6b9d' },
+    { icon: '🌈', text: 'Eat rainbows for energy!', color: '#4dc9ff' },
+    { icon: '⭐', text: 'Fill the bar to SUPER WIN!', color: '#ffd700' },
+    { icon: '✨', text: 'Golden rainbows = bonus!', color: '#ffec80' },
+    { icon: '💖', text: 'Power-ups help you!', color: '#ff4d8b' },
+  ];
 
-  // Tap to play
+  const instrSize = Math.min(18, W*0.035);
+  const iconSize = Math.min(26, W*0.045);
+  const instrStartY = H*0.30;
+  const instrSpacing = Math.min(38, H*0.055);
+
+  instructions.forEach((inst, i) => {
+    // Each instruction fades in sequentially, then stays
+    const fadeStart = 0.5 + i * 0.6; // stagger
+    const alpha = Math.min(1, Math.max(0, (t - fadeStart) * 2));
+    // Gentle bob
+    const bob = Math.sin(t*2 + i*0.8) * 3;
+    const iy = instrStartY + i * instrSpacing + bob;
+
+    ctx.globalAlpha = alpha;
+    ctx.font = `${iconSize}px sans-serif`;
+    ctx.fillText(inst.icon, W/2 - Math.min(140, W*0.28), iy);
+    ctx.font = `bold ${instrSize}px sans-serif`;
+    ctx.fillStyle = inst.color;
+    ctx.fillText(inst.text, W/2 + 10, iy);
+  });
+  ctx.globalAlpha = 1;
+
+  // --- LEADERBOARD ---
+  const lbY = instrStartY + instructions.length * instrSpacing + 15;
+  const scores = leaderboard.length > 0 ? leaderboard : personalBests;
+  if (scores.length > 0) {
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `bold ${Math.min(18, W*0.035)}px sans-serif`;
+    ctx.fillText('🏆 Top Scores 🏆', W/2, lbY);
+    const lbSize = Math.min(14, W*0.028);
+    ctx.font = `${lbSize}px sans-serif`;
+    scores.slice(0, 5).forEach((s, i) => {
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '⭐';
+      ctx.fillStyle = i < 3 ? '#ffd700' : '#ccc';
+      ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, lbY + 20 + i * (lbSize + 6));
+    });
+  }
+
+  // --- TAP TO PLAY (always prominent at bottom) ---
   const pulse = 0.7 + Math.sin(t*3)*0.3;
   ctx.globalAlpha = pulse;
   ctx.fillStyle = '#ffd700';
-  ctx.font = `bold ${Math.min(28, W*0.05)}px sans-serif`;
-  ctx.fillText('🌟 Tap to Play! 🌟', W/2, H*0.68);
+  ctx.font = `bold ${Math.min(30, W*0.055)}px sans-serif`;
+  ctx.fillText('🌟 Tap to Play! 🌟', W/2, H*0.90);
   ctx.globalAlpha = 1;
-
-  // Bottom decorations
-  ctx.font = '30px sans-serif';
-  ctx.fillText('🌈  ⭐  💖  ✨  🌈', W/2, H*0.82);
 
   ctx.restore();
 }
@@ -892,34 +999,123 @@ function drawEndScreen() {
   ctx.textAlign = 'center';
 
   if (gameState === 'win') {
-    // Dancing unicorn (bounce)
-    const bounce = Math.abs(Math.sin(winTime*5))*20;
-    ctx.font = `${70+Math.sin(winTime*3)*10}px sans-serif`;
-    ctx.fillText('🦄', W/2, H*0.32 - bounce);
+    if (showingNameEntry) {
+      // --- NAME ENTRY SCREEN ---
+      ctx.fillStyle = '#ffd700';
+      ctx.font = `bold ${Math.min(30, W*0.055)}px sans-serif`;
+      ctx.fillText('⭐ NEW HIGH SCORE! ⭐', W/2, H*0.12);
 
-    // Big rainbow
-    ctx.font = '60px sans-serif';
-    ctx.fillText('🌈', W/2, H*0.18);
+      ctx.fillStyle = '#fff';
+      ctx.font = `${Math.min(22, W*0.04)}px sans-serif`;
+      ctx.fillText(`${pendingScore} points!`, W/2, H*0.19);
 
-    // You did it!
-    const colors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
-    ctx.font = `bold ${Math.min(48, W*0.08)}px sans-serif`;
-    const msg = 'YOU DID IT!';
-    const mw = ctx.measureText(msg);
-    const sx = W/2 - mw.width/2;
-    for (let i = 0; i < msg.length; i++) {
-      ctx.fillStyle = colors[Math.floor((i+winTime*5) % colors.length)];
-      const cw = ctx.measureText(msg[i]).width;
-      const yOff = Math.sin(winTime*4+i*0.4)*8;
-      ctx.fillText(msg[i], sx + ctx.measureText(msg.substring(0,i)).width + cw/2, H*0.48 + yOff);
+      ctx.fillStyle = '#ff6b9d';
+      ctx.font = `bold ${Math.min(24, W*0.042)}px sans-serif`;
+      ctx.fillText("What's your name? 🦄", W/2, H*0.27);
+
+      // Name input box
+      const boxW = Math.min(280, W*0.7);
+      const boxH = 55;
+      const boxX = (W-boxW)/2;
+      const boxY = H*0.30;
+      ctx.shadowColor = '#ff6b9d';
+      ctx.shadowBlur = 15;
+      ctx.fillStyle = 'rgba(255,255,255,0.95)';
+      ctx.beginPath(); ctx.roundRect(boxX, boxY, boxW, boxH, 15); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = nameInput ? '#2d1b4e' : '#bbb';
+      ctx.font = `bold ${Math.min(28, W*0.05)}px sans-serif`;
+      const cursor = Math.sin(winTime*5)>0 ? '|' : '';
+      ctx.fillText(nameInput ? nameInput + cursor : 'Type here...', W/2, boxY + boxH/2 + 10);
+
+      // On-screen keyboard
+      const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      const btnSize = Math.min(36, Math.floor((W-30)/10));
+      const btnPad = 3;
+      const rowLen = 10;
+      const kbStartY = boxY + boxH + 15;
+      const kbW = rowLen * (btnSize + btnPad);
+      const kbStartX = (W - kbW) / 2;
+      const btnColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
+
+      for (let i = 0; i < letters.length; i++) {
+        const row = Math.floor(i / rowLen);
+        const col = i % rowLen;
+        const bx = kbStartX + col * (btnSize + btnPad);
+        const by = kbStartY + row * (btnSize + btnPad);
+        ctx.fillStyle = btnColors[i % btnColors.length];
+        ctx.beginPath(); ctx.roundRect(bx, by, btnSize, btnSize, 8); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.floor(btnSize*0.5)}px sans-serif`;
+        ctx.fillText(letters[i], bx + btnSize/2, by + btnSize*0.65);
+      }
+
+      // Delete & Done
+      const ctrlY = kbStartY + 3 * (btnSize + btnPad) + 5;
+      const ctrlBtnW = Math.min(100, W*0.25);
+      ctx.fillStyle = '#ff4d8b';
+      ctx.beginPath(); ctx.roundRect(W/2 - ctrlBtnW - 10, ctrlY, ctrlBtnW, btnSize+4, 10); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${Math.floor(btnSize*0.4)}px sans-serif`;
+      ctx.fillText('⬅ Delete', W/2 - ctrlBtnW/2 - 10, ctrlY + btnSize*0.7);
+      ctx.fillStyle = '#4dff88';
+      ctx.beginPath(); ctx.roundRect(W/2 + 10, ctrlY, ctrlBtnW, btnSize+4, 10); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillText('✅ Done!', W/2 + ctrlBtnW/2 + 10, ctrlY + btnSize*0.7);
+
+      // Store layout for click handling
+      window._nameKB = { letters, btnSize, btnPad, rowLen, kbStartX, kbStartY, ctrlY, ctrlBtnW };
+    } else {
+      // --- NORMAL WIN SCREEN ---
+      const bounce = Math.abs(Math.sin(winTime*5))*20;
+      ctx.font = `${60+Math.sin(winTime*3)*8}px sans-serif`;
+      ctx.fillText('🦄', W/2, H*0.22 - bounce);
+      ctx.font = '50px sans-serif';
+      ctx.fillText('🌈', W/2, H*0.10);
+
+      const wColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
+      ctx.font = `bold ${Math.min(42, W*0.07)}px sans-serif`;
+      const msg = 'YOU DID IT!';
+      const mw = ctx.measureText(msg);
+      const msx = W/2 - mw.width/2;
+      for (let i = 0; i < msg.length; i++) {
+        ctx.fillStyle = wColors[Math.floor((i+winTime*5) % wColors.length)];
+        const cw = ctx.measureText(msg[i]).width;
+        const yOff = Math.sin(winTime*4+i*0.4)*8;
+        ctx.fillText(msg[i], msx + ctx.measureText(msg.substring(0,i)).width + cw/2, H*0.38 + yOff);
+      }
+
+      ctx.fillStyle = '#fff';
+      ctx.font = `${Math.min(20, W*0.035)}px sans-serif`;
+      ctx.fillText(`You ate ${score} rainbow points! ✨`, W/2, H*0.46);
+
+      // Show leaderboard
+      const allScores = leaderboard.length > 0 ? leaderboard : personalBests;
+      if (allScores.length > 0) {
+        ctx.fillStyle = '#ffd700';
+        ctx.font = `bold ${Math.min(16, W*0.032)}px sans-serif`;
+        ctx.fillText('🏆 Leaderboard 🏆', W/2, H*0.54);
+        const lbS = Math.min(13, W*0.026);
+        ctx.font = `${lbS}px sans-serif`;
+        allScores.slice(0,5).forEach((s,i) => {
+          const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'⭐';
+          ctx.fillStyle = i<3 ? '#ffd700' : '#ccc';
+          ctx.fillText(`${medal} ${s.name} — ${s.score}pts`, W/2, H*0.54 + 18 + i*(lbS+5));
+        });
+      }
+
+      ctx.font = '26px sans-serif';
+      ctx.fillText('🎉 🦄 🌈 ⭐ 💖 🎉', W/2, H*0.80);
+
+      if (winTime > 2) {
+        const pulse = 0.7 + Math.sin(winTime*3)*0.3;
+        ctx.globalAlpha = pulse;
+        ctx.fillStyle = '#ffd700';
+        ctx.font = `bold ${Math.min(22, W*0.04)}px sans-serif`;
+        ctx.fillText('🌟 Tap to Play Again! 🌟', W/2, H*0.90);
+        ctx.globalAlpha = 1;
+      }
     }
-
-    ctx.fillStyle = '#fff';
-    ctx.font = `${Math.min(24, W*0.04)}px sans-serif`;
-    ctx.fillText(`You ate ${score} rainbow points! ✨`, W/2, H*0.58);
-    ctx.fillText('You are a Rainbow Champion! 👑', W/2, H*0.65);
-    ctx.font = '30px sans-serif';
-    ctx.fillText('🎉 🦄 🌈 ⭐ 💖 🎉', W/2, H*0.74);
   } else {
     // Gentle lose
     ctx.font = '60px sans-serif';
@@ -936,15 +1132,15 @@ function drawEndScreen() {
     ctx.fillStyle = '#ffd700';
     ctx.font = `bold ${Math.min(20, W*0.035)}px sans-serif`;
     ctx.fillText(`Score: ${score} ✨`, W/2, H*0.74);
-  }
 
-  if (winTime > 2) {
-    const pulse = 0.7 + Math.sin(winTime*3)*0.3;
-    ctx.globalAlpha = pulse;
-    ctx.fillStyle = '#ffd700';
-    ctx.font = `bold ${Math.min(24, W*0.04)}px sans-serif`;
-    ctx.fillText('🌟 Tap to Play Again! 🌟', W/2, H*0.88);
-    ctx.globalAlpha = 1;
+    if (winTime > 2) {
+      const pulse = 0.7 + Math.sin(winTime*3)*0.3;
+      ctx.globalAlpha = pulse;
+      ctx.fillStyle = '#ffd700';
+      ctx.font = `bold ${Math.min(22, W*0.04)}px sans-serif`;
+      ctx.fillText('🌟 Tap to Play Again! 🌟', W/2, H*0.88);
+      ctx.globalAlpha = 1;
+    }
   }
 }
 
