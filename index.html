@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>🦄 Eating Unicorn Rainbows 🌈</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:#1a0a2e; touch-action:none; user-select:none; -webkit-user-select:none; }
+canvas { display:block; width:100%; height:100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ============================================================
+// 🦄 EATING UNICORN RAINBOWS — A Magical Game for Kids 🌈
+// ============================================================
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// --- Resize ---
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// --- Audio Engine ---
+let audioCtx;
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+
+function playChime(freq, dur=0.15, vol=0.12, type='sine') {
+  if (!audioCtx) return;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = type;
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + dur);
+}
+
+function playEatSound(combo) {
+  const base = 523 + combo * 60; // C5 + ascending
+  playChime(base, 0.2, 0.1);
+  setTimeout(() => playChime(base * 1.25, 0.15, 0.08), 50);
+  setTimeout(() => playChime(base * 1.5, 0.12, 0.06), 100);
+}
+
+function playPowerUp() {
+  [660,880,1100,1320].forEach((f,i) => setTimeout(() => playChime(f, 0.2, 0.1), i*80));
+}
+
+function playWinFanfare() {
+  const notes = [523,659,784,1047,784,1047,1319,1047,1319,1568];
+  notes.forEach((f,i) => setTimeout(() => playChime(f, 0.4, 0.12, i%2?'sine':'triangle'), i*150));
+}
+
+// Simple background melody
+let melodyInterval;
+function startMelody() {
+  if (melodyInterval) return;
+  const scale = [262,294,330,349,392,440,494,523,494,440,392,349,330,294];
+  let idx = 0;
+  melodyInterval = setInterval(() => {
+    if (gameState !== 'playing') return;
+    playChime(scale[idx % scale.length], 0.3, 0.03, 'triangle');
+    if (Math.random() < 0.3) playChime(scale[idx % scale.length] * 1.5, 0.2, 0.02, 'sine');
+    idx++;
+  }, 600);
+}
+
+function stopMelody() { clearInterval(melodyInterval); melodyInterval = null; }
+
+// --- Game State ---
+let gameState = 'title'; // title, playing, win, lose
+const GAME_DURATION = 120; // 2 minutes (more fun than 10 for kids)
+const WIN_ENERGY = 100;
+let timer = GAME_DURATION;
+let energy = 0;
+let score = 0;
+let combo = 0;
+let comboTimer = 0;
+let shakeAmount = 0;
+let flashAlpha = 0;
+let globalSparkle = 0; // 0-1 progressive enhancement
+let titleTime = 0;
+let winTime = 0;
+
+// --- Unicorn ---
+const unicorn = {
+  x: 0, y: 0, targetX: 0, targetY: 0, angle: 0,
+  speed: 5, baseSpeed: 5, sparkle: 0, scale: 1,
+  trail: [], orbStars: [], blinkTimer: 0, expression: 'happy',
+  powerTimer: 0, // star power remaining
+};
+
+// --- Entities ---
+let swirls = [];
+let powerups = [];
+let particles = [];
+let bgStars = [];
+let clouds = [];
+let fireworks = [];
+
+// --- Input ---
+let keys = {};
+let mouseTarget = null;
+let touching = false;
+
+document.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; initAudio(); });
+document.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+canvas.addEventListener('pointerdown', e => {
+  initAudio();
+  if (gameState === 'title') { startGame(); return; }
+  if (gameState === 'win' || gameState === 'lose') { if (winTime > 2) { resetToTitle(); } return; }
+  mouseTarget = { x: e.clientX, y: e.clientY };
+  touching = true;
+});
+canvas.addEventListener('pointermove', e => {
+  if (touching && gameState === 'playing') mouseTarget = { x: e.clientX, y: e.clientY };
+});
+canvas.addEventListener('pointerup', () => { touching = false; });
+
+// --- Init BG ---
+function initBG() {
+  bgStars = [];
+  for (let i = 0; i < 80; i++) {
+    bgStars.push({ x: Math.random()*2000, y: Math.random()*2000, size: Math.random()*2.5+0.5, twinkle: Math.random()*Math.PI*2, speed: Math.random()*0.02+0.01 });
+  }
+  clouds = [];
+  for (let i = 0; i < 6; i++) {
+    clouds.push({ x: Math.random()*2000, y: Math.random()*H*0.5, w: Math.random()*200+100, speed: Math.random()*0.3+0.1, alpha: Math.random()*0.3+0.1 });
+  }
+}
+
+// --- Spawn ---
+function spawnSwirl() {
+  const isGold = Math.random() < 0.08;
+  const colors = ['#ff6b9d','#c44dff','#4dc9ff','#ff9e4d','#4dff88','#ff4d8b'];
+  swirls.push({
+    x: Math.random() * W, y: Math.random() * H,
+    radius: 18 + Math.random()*12,
+    rotation: Math.random() * Math.PI * 2,
+    rotSpeed: (Math.random()-0.5) * 0.05,
+    color: isGold ? '#ffd700' : colors[Math.floor(Math.random()*colors.length)],
+    isGold, alpha: 0, fadeIn: true,
+    bobPhase: Math.random() * Math.PI * 2,
+    points: isGold ? 15 : 5,
+    life: 1,
+  });
+}
+
+function spawnPowerup() {
+  const types = ['star','heart','cloud'];
+  const type = types[Math.floor(Math.random()*types.length)];
+  powerups.push({
+    x: Math.random()*W, y: Math.random()*H,
+    type, radius: 22, alpha: 0, fadeIn: true,
+    bobPhase: Math.random()*Math.PI*2, life: 1,
+  });
+}
+
+function spawnParticles(x, y, color, count=8, spread=3) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random()*Math.PI*2;
+    const speed = Math.random()*spread+1;
+    particles.push({
+      x, y, vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed,
+      life: 1, decay: 0.015+Math.random()*0.02,
+      color, size: Math.random()*5+2,
+      type: Math.random()<0.3 ? 'star' : 'circle',
+    });
+  }
+}
+
+function spawnFirework(x, y) {
+  const colors = ['#ff6b9d','#ffd700','#4dc9ff','#c44dff','#4dff88','#ff9e4d','#fff'];
+  const c = colors[Math.floor(Math.random()*colors.length)];
+  for (let i = 0; i < 30; i++) {
+    const angle = Math.random()*Math.PI*2;
+    const speed = Math.random()*6+2;
+    fireworks.push({
+      x, y, vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed - 2,
+      life: 1, decay: 0.01+Math.random()*0.015, color: c, size: Math.random()*4+2,
+    });
+  }
+}
+
+// --- Game Flow ---
+function startGame() {
+  gameState = 'playing';
+  timer = GAME_DURATION;
+  energy = 0; score = 0; combo = 0; comboTimer = 0;
+  shakeAmount = 0; flashAlpha = 0; globalSparkle = 0;
+  unicorn.x = W/2; unicorn.y = H/2;
+  unicorn.targetX = W/2; unicorn.targetY = H/2;
+  unicorn.trail = []; unicorn.orbStars = [];
+  unicorn.sparkle = 0; unicorn.powerTimer = 0;
+  swirls = []; powerups = []; particles = []; fireworks = [];
+  for (let i = 0; i < 8; i++) spawnSwirl();
+  startMelody();
+}
+
+function resetToTitle() {
+  gameState = 'title'; titleTime = 0;
+  stopMelody();
+  swirls = []; powerups = []; particles = []; fireworks = [];
+}
+
+// --- Update ---
+let lastTime = 0;
+function update(dt) {
+  if (gameState === 'title') { titleTime += dt; return; }
+  if (gameState === 'win' || gameState === 'lose') {
+    winTime += dt;
+    // fireworks in win
+    if (gameState === 'win' && Math.random() < 0.15) {
+      spawnFirework(Math.random()*W, Math.random()*H*0.6);
+    }
+    fireworks.forEach(f => { f.x += f.vx; f.y += f.vy; f.vy += 0.05; f.life -= f.decay; });
+    fireworks = fireworks.filter(f => f.life > 0);
+    particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.life -= p.decay; });
+    particles = particles.filter(p => p.life > 0);
+    // sparkle rain
+    if (gameState === 'win' && Math.random() < 0.5) {
+      spawnParticles(Math.random()*W, Math.random()*-20, '#ffd700', 1, 1);
+    }
+    return;
+  }
+
+  // --- Playing ---
+  timer -= dt;
+  if (timer <= 0) {
+    timer = 0;
+    if (energy >= WIN_ENERGY) {
+      gameState = 'win'; winTime = 0;
+      playWinFanfare();
+      for (let i=0;i<10;i++) spawnFirework(Math.random()*W, Math.random()*H*0.5);
+    } else {
+      gameState = 'lose'; winTime = 0;
+      playChime(330, 0.5, 0.1); playChime(262, 0.5, 0.08);
+    }
+    return;
+  }
+
+  // Check if energy full
+  if (energy >= WIN_ENERGY) {
+    gameState = 'win'; winTime = 0;
+    playWinFanfare();
+    for (let i=0;i<10;i++) spawnFirework(Math.random()*W, Math.random()*H*0.5);
+    return;
+  }
+
+  globalSparkle = Math.min(1, energy / WIN_ENERGY);
+
+  // Movement
+  let dx = 0, dy = 0;
+  if (keys['arrowleft'] || keys['a']) dx = -1;
+  if (keys['arrowright'] || keys['d']) dx = 1;
+  if (keys['arrowup'] || keys['w']) dy = -1;
+  if (keys['arrowdown'] || keys['s']) dy = 1;
+
+  if (mouseTarget && touching) {
+    const mdx = mouseTarget.x - unicorn.x;
+    const mdy = mouseTarget.y - unicorn.y;
+    const dist = Math.sqrt(mdx*mdx + mdy*mdy);
+    if (dist > 10) { dx = mdx/dist; dy = mdy/dist; }
+    else { mouseTarget = null; }
+  }
+
+  const spd = unicorn.powerTimer > 0 ? unicorn.baseSpeed * 2 : unicorn.baseSpeed;
+  if (dx || dy) {
+    const len = Math.sqrt(dx*dx+dy*dy);
+    unicorn.x += (dx/len) * spd * 60 * dt;
+    unicorn.y += (dy/len) * spd * 60 * dt;
+    unicorn.angle = Math.atan2(dy, dx);
+    // trail
+    unicorn.trail.push({ x: unicorn.x, y: unicorn.y, life: 1 });
+    if (unicorn.trail.length > 30) unicorn.trail.shift();
+  }
+
+  // Clamp
+  unicorn.x = Math.max(30, Math.min(W-30, unicorn.x));
+  unicorn.y = Math.max(30, Math.min(H-30, unicorn.y));
+
+  // Power timer
+  if (unicorn.powerTimer > 0) unicorn.powerTimer -= dt;
+
+  // Trail fade
+  unicorn.trail.forEach(t => t.life -= 0.03);
+  unicorn.trail = unicorn.trail.filter(t => t.life > 0);
+
+  // Blink
+  unicorn.blinkTimer -= dt;
+  if (unicorn.blinkTimer <= 0) unicorn.blinkTimer = 2 + Math.random()*3;
+
+  // Combo timer
+  if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) combo = 0; }
+
+  // Swirl collision
+  swirls.forEach(s => {
+    if (s.fadeIn) { s.alpha = Math.min(1, s.alpha + 2*dt); if(s.alpha>=1) s.fadeIn=false; }
+    s.rotation += s.rotSpeed;
+    s.bobPhase += 2*dt;
+    const sdx = unicorn.x - s.x;
+    const sdy = unicorn.y - (s.y + Math.sin(s.bobPhase)*8);
+    const dist = Math.sqrt(sdx*sdx+sdy*sdy);
+    if (dist < s.radius + 25) {
+      s.life = 0;
+      combo++;
+      comboTimer = 1.5;
+      const pts = s.points * (1 + Math.floor(combo/3));
+      score += pts;
+      energy = Math.min(WIN_ENERGY, energy + (s.isGold ? 8 : 3));
+      unicorn.sparkle = 1;
+      shakeAmount = s.isGold ? 8 : 4;
+      flashAlpha = s.isGold ? 0.3 : 0.15;
+      playEatSound(Math.min(combo, 10));
+      spawnParticles(s.x, s.y, s.color, s.isGold ? 20 : 10, s.isGold ? 5 : 3);
+      // Orb star on gold
+      if (s.isGold && unicorn.orbStars.length < 8) {
+        unicorn.orbStars.push({ angle: Math.random()*Math.PI*2, dist: 40+Math.random()*15 });
+      }
+    }
+  });
+  swirls = swirls.filter(s => s.life > 0);
+
+  // Powerup collision
+  powerups.forEach(p => {
+    if (p.fadeIn) { p.alpha = Math.min(1, p.alpha + 2*dt); if(p.alpha>=1) p.fadeIn=false; }
+    p.bobPhase += 2*dt;
+    const pdx = unicorn.x - p.x;
+    const pdy = unicorn.y - (p.y + Math.sin(p.bobPhase)*6);
+    const dist = Math.sqrt(pdx*pdx+pdy*pdy);
+    if (dist < p.radius + 25) {
+      p.life = 0;
+      playPowerUp();
+      spawnParticles(p.x, p.y, '#ffd700', 15, 4);
+      if (p.type === 'star') unicorn.powerTimer = 5;
+      else if (p.type === 'heart') { unicorn.sparkle = 1; energy = Math.min(WIN_ENERGY, energy+10); }
+      else if (p.type === 'cloud') { unicorn.y -= 60; spawnParticles(unicorn.x, unicorn.y, '#fff', 12, 3); }
+    }
+  });
+  powerups = powerups.filter(p => p.life > 0);
+
+  // Spawn
+  if (swirls.length < 6 + globalSparkle*6 && Math.random() < 0.03) spawnSwirl();
+  if (powerups.length < 2 && Math.random() < 0.003) spawnPowerup();
+
+  // Particles
+  particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.03; p.life -= p.decay; });
+  particles = particles.filter(p => p.life > 0);
+
+  // Ambient sparkles based on progress
+  if (Math.random() < globalSparkle * 0.3) {
+    spawnParticles(Math.random()*W, Math.random()*H, 
+      ['#ffd700','#ff6b9d','#4dc9ff','#c44dff'][Math.floor(Math.random()*4)], 1, 1);
+  }
+
+  // Shake decay
+  shakeAmount *= 0.9;
+  flashAlpha *= 0.92;
+  unicorn.sparkle *= 0.95;
+
+  // Clouds drift
+  clouds.forEach(c => { c.x += c.speed; if(c.x > W+200) c.x = -c.w; });
+
+  // BG stars twinkle
+  bgStars.forEach(s => { s.twinkle += s.speed; });
+
+  // Orb stars rotate
+  unicorn.orbStars.forEach(s => { s.angle += 0.03; });
+}
+
+// --- Draw Helpers ---
+function drawStar(cx, cy, r, points=5, color='#ffd700') {
+  ctx.beginPath();
+  for (let i = 0; i < points*2; i++) {
+    const a = (i * Math.PI / points) - Math.PI/2;
+    const rad = i%2===0 ? r : r*0.4;
+    if(i===0) ctx.moveTo(cx+Math.cos(a)*rad, cy+Math.sin(a)*rad);
+    else ctx.lineTo(cx+Math.cos(a)*rad, cy+Math.sin(a)*rad);
+  }
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function drawHeart(cx, cy, size, color='#ff4d8b') {
+  ctx.save(); ctx.translate(cx, cy); ctx.scale(size/15, size/15);
+  ctx.beginPath();
+  ctx.moveTo(0, -3);
+  ctx.bezierCurveTo(-8,-15,-18,-5,0,10);
+  ctx.moveTo(0, -3);
+  ctx.bezierCurveTo(8,-15,18,-5,0,10);
+  ctx.fillStyle = color; ctx.fill();
+  ctx.restore();
+}
+
+function drawCloud(cx, cy, w, alpha) {
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = '#fff';
+  const h = w*0.4;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, w*0.5, h*0.4, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(cx-w*0.2, cy-h*0.15, w*0.3, h*0.35, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(cx+w*0.15, cy-h*0.2, w*0.25, h*0.3, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+// --- Draw Unicorn ---
+function drawUnicorn(x, y, facing, sparkle) {
+  ctx.save();
+  ctx.translate(x, y);
+  const flip = facing < -Math.PI/2 || facing > Math.PI/2 ? -1 : 1;
+  ctx.scale(flip, 1);
+
+  const sc = 1 + sparkle*0.1;
+  ctx.scale(sc, sc);
+
+  // Glow
+  if (sparkle > 0.1 || unicorn.powerTimer > 0) {
+    const grad = ctx.createRadialGradient(0, 0, 10, 0, 0, 50);
+    const glowColor = unicorn.powerTimer > 0 ? 'rgba(255,215,0,' : 'rgba(255,107,157,';
+    grad.addColorStop(0, glowColor + (sparkle*0.4+0.1) + ')');
+    grad.addColorStop(1, glowColor + '0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(0, 0, 50, 0, Math.PI*2); ctx.fill();
+  }
+
+  // Body
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#e8d5f0';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(0, 5, 22, 18, 0, 0, Math.PI*2);
+  ctx.fill(); ctx.stroke();
+
+  // Head
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.ellipse(18, -8, 15, 13, 0.2, 0, Math.PI*2);
+  ctx.fill(); ctx.stroke();
+
+  // Horn
+  ctx.fillStyle = '#ffd700';
+  ctx.beginPath();
+  ctx.moveTo(28, -22);
+  ctx.lineTo(24, -8);
+  ctx.lineTo(32, -10);
+  ctx.closePath();
+  ctx.fill();
+  // Horn spiral
+  ctx.strokeStyle = '#ffec80';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(26, -18); ctx.lineTo(29, -15);
+  ctx.moveTo(25, -14); ctx.lineTo(28, -12);
+  ctx.stroke();
+
+  // Ear
+  ctx.fillStyle = '#ffe0f0';
+  ctx.beginPath();
+  ctx.moveTo(22, -18);
+  ctx.lineTo(18, -26);
+  ctx.lineTo(26, -19);
+  ctx.closePath();
+  ctx.fill();
+
+  // Eye
+  const blinking = unicorn.blinkTimer < 0.15;
+  ctx.fillStyle = '#2d1b4e';
+  if (blinking) {
+    ctx.beginPath();
+    ctx.moveTo(22, -10); ctx.lineTo(28, -10);
+    ctx.strokeStyle = '#2d1b4e'; ctx.lineWidth = 2; ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.arc(25, -10, 4, 0, Math.PI*2);
+    ctx.fill();
+    // Eye shine
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(26.5, -11.5, 1.5, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // Blush
+  ctx.fillStyle = 'rgba(255,150,180,0.4)';
+  ctx.beginPath(); ctx.ellipse(28, -4, 5, 3, 0, 0, Math.PI*2); ctx.fill();
+
+  // Smile
+  ctx.strokeStyle = '#c77dba';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(26, -5, 4, 0.2, Math.PI-0.2);
+  ctx.stroke();
+
+  // Mane (rainbow!)
+  const maneColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
+  maneColors.forEach((c, i) => {
+    ctx.fillStyle = c;
+    ctx.globalAlpha = 0.8;
+    const mx = 10 - i*3;
+    const my = -15 + i*2 + Math.sin(Date.now()/200 + i)*2;
+    ctx.beginPath();
+    ctx.ellipse(mx, my, 6, 4, -0.5+i*0.2, 0, Math.PI*2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+
+  // Tail (rainbow!)
+  maneColors.forEach((c, i) => {
+    ctx.strokeStyle = c;
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    const tx = -22 - i*2;
+    const ty = 5 + Math.sin(Date.now()/300 + i)*4;
+    ctx.moveTo(-18, 8);
+    ctx.quadraticCurveTo(tx-5, ty-10+Math.sin(Date.now()/250+i)*5, tx-8, ty+5);
+    ctx.stroke();
+  });
+  ctx.globalAlpha = 1;
+
+  // Legs
+  ctx.strokeStyle = '#e8d5f0';
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  const legBob = Math.sin(Date.now()/150)*3;
+  [[-10,18,legBob],[5,18,-legBob],[-5,18,-legBob],[10,18,legBob]].forEach(([lx,ly,bob]) => {
+    ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx+bob, ly+12); ctx.stroke();
+    // Hooves
+    ctx.fillStyle = '#ddc0f0';
+    ctx.beginPath(); ctx.arc(lx+bob, ly+13, 3, 0, Math.PI*2); ctx.fill();
+  });
+
+  ctx.restore();
+}
+
+// --- Draw Rainbow Swirl ---
+function drawSwirl(s) {
+  const by = Math.sin(s.bobPhase)*8;
+  ctx.save();
+  ctx.translate(s.x, s.y + by);
+  ctx.rotate(s.rotation);
+  ctx.globalAlpha = s.alpha;
+
+  // Glow
+  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, s.radius*1.5);
+  grad.addColorStop(0, s.color + '40');
+  grad.addColorStop(1, s.color + '00');
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.arc(0, 0, s.radius*1.5, 0, Math.PI*2); ctx.fill();
+
+  // Spiral
+  ctx.strokeStyle = s.color;
+  ctx.lineWidth = s.isGold ? 4 : 3;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  for (let t = 0; t < Math.PI*4; t += 0.15) {
+    const r = (t / (Math.PI*4)) * s.radius;
+    const px = Math.cos(t) * r;
+    const py = Math.sin(t) * r;
+    if (t === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+
+  // Center dot
+  ctx.fillStyle = s.isGold ? '#fff' : s.color;
+  ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI*2); ctx.fill();
+
+  // Gold sparkle
+  if (s.isGold) {
+    drawStar(s.radius*0.5, -s.radius*0.5, 5, 4, '#ffd700');
+    drawStar(-s.radius*0.4, s.radius*0.3, 3, 4, '#ffec80');
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+// --- Draw Powerup ---
+function drawPowerup(p) {
+  const by = Math.sin(p.bobPhase)*6;
+  ctx.save();
+  ctx.translate(p.x, p.y + by);
+  ctx.globalAlpha = p.alpha;
+
+  // Glow
+  const grad = ctx.createRadialGradient(0, 0, 5, 0, 0, 30);
+  grad.addColorStop(0, 'rgba(255,255,255,0.4)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI*2); ctx.fill();
+
+  if (p.type === 'star') {
+    drawStar(0, 0, 15, 5, '#ffd700');
+    drawStar(0, 0, 8, 5, '#fff');
+  } else if (p.type === 'heart') {
+    drawHeart(0, -2, 20, '#ff4d8b');
+  } else if (p.type === 'cloud') {
+    drawCloud(0, 0, 35, 0.9);
+    ctx.fillStyle = '#4dc9ff';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('↑', 0, 5);
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+// --- Draw Background ---
+function drawBackground() {
+  // Sky gradient that gets more colorful with progress
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  const mag = globalSparkle;
+  const r1 = Math.floor(30 + mag*40);
+  const g1 = Math.floor(10 + mag*20);
+  const b1 = Math.floor(60 + mag*50);
+  const r2 = Math.floor(60 + mag*80);
+  const g2 = Math.floor(20 + mag*40);
+  const b2 = Math.floor(100 + mag*60);
+  grad.addColorStop(0, `rgb(${r1},${g1},${b1})`);
+  grad.addColorStop(1, `rgb(${r2},${g2},${b2})`);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Stars
+  bgStars.forEach(s => {
+    const alpha = 0.3 + Math.sin(s.twinkle)*0.3 + mag*0.3;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#fff';
+    if (s.size > 2) {
+      drawStar(s.x % W, s.y % H, s.size, 4, '#fff');
+    } else {
+      ctx.beginPath();
+      ctx.arc(s.x % W, s.y % H, s.size, 0, Math.PI*2);
+      ctx.fill();
+    }
+  });
+  ctx.globalAlpha = 1;
+
+  // Clouds
+  clouds.forEach(c => drawCloud(c.x, c.y, c.w, c.alpha + mag*0.1));
+
+  // Ground (soft gradient)
+  const gGrad = ctx.createLinearGradient(0, H*0.85, 0, H);
+  gGrad.addColorStop(0, 'rgba(100,50,150,0)');
+  gGrad.addColorStop(1, `rgba(${80+mag*50},${40+mag*30},${120+mag*40},0.3)`);
+  ctx.fillStyle = gGrad;
+  ctx.fillRect(0, H*0.85, W, H*0.15);
+}
+
+// --- Draw HUD ---
+function drawHUD() {
+  // Rainbow Energy bar
+  const barW = Math.min(300, W*0.6);
+  const barH = 25;
+  const barX = (W - barW)/2;
+  const barY = 15;
+
+  // Label
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('🌈 Rainbow Energy 🌈', W/2, barY - 2);
+
+  // Bar bg
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.roundRect(barX, barY+2, barW, barH, barH/2);
+  ctx.fill();
+
+  // Bar fill (rainbow gradient)
+  const fill = energy / WIN_ENERGY;
+  if (fill > 0) {
+    const fGrad = ctx.createLinearGradient(barX, 0, barX + barW*fill, 0);
+    fGrad.addColorStop(0, '#ff6b9d');
+    fGrad.addColorStop(0.2, '#ff9e4d');
+    fGrad.addColorStop(0.4, '#ffd700');
+    fGrad.addColorStop(0.6, '#4dff88');
+    fGrad.addColorStop(0.8, '#4dc9ff');
+    fGrad.addColorStop(1, '#c44dff');
+    ctx.fillStyle = fGrad;
+    ctx.beginPath();
+    ctx.roundRect(barX+2, barY+4, (barW-4)*fill, barH-4, (barH-4)/2);
+    ctx.fill();
+  }
+
+  // Timer as rainbow bridge
+  const bridgeY = barY + barH + 12;
+  const timeLeft = timer / GAME_DURATION;
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.textAlign = 'center';
+  const mins = Math.floor(timer/60);
+  const secs = Math.floor(timer%60);
+  ctx.fillText(`🌉 Rainbow Bridge: ${mins}:${secs.toString().padStart(2,'0')} 🌉`, W/2, bridgeY);
+
+  // Bridge visual
+  const bW = Math.min(250, W*0.5);
+  const bX = (W-bW)/2;
+  const bY = bridgeY + 5;
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath(); ctx.roundRect(bX, bY, bW, 8, 4); ctx.fill();
+  const bColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
+  const bFill = 1 - timeLeft;
+  bColors.forEach((c, i) => {
+    const segW = (bW-4) * bFill / bColors.length;
+    ctx.fillStyle = c;
+    ctx.fillRect(bX+2 + i*segW, bY+1, segW+1, 6);
+  });
+
+  // Score
+  ctx.fillStyle = '#ffd700';
+  ctx.font = 'bold 18px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(`✨ ${score}`, 15, 30);
+
+  // Combo
+  if (combo > 1) {
+    ctx.fillStyle = '#ff6b9d';
+    ctx.font = `bold ${18+combo*2}px sans-serif`;
+    ctx.textAlign = 'right';
+    ctx.fillText(`${combo}x COMBO! 🔥`, W-15, 30);
+  }
+}
+
+// --- Draw Title ---
+function drawTitle() {
+  drawBackground();
+
+  // Title text with rainbow
+  const t = titleTime;
+  ctx.save();
+  ctx.textAlign = 'center';
+
+  // Big unicorn emoji
+  ctx.font = `${60 + Math.sin(t*2)*5}px sans-serif`;
+  ctx.fillText('🦄', W/2, H*0.28);
+
+  // Title
+  const title = 'Eating Unicorn Rainbows';
+  ctx.font = `bold ${Math.min(42, W*0.07)}px sans-serif`;
+  // Rainbow text
+  const metrics = ctx.measureText(title);
+  const startX = W/2 - metrics.width/2;
+  const colors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
+  for (let i = 0; i < title.length; i++) {
+    const c = colors[Math.floor((i + t*3) % colors.length)];
+    ctx.fillStyle = c;
+    const charW = ctx.measureText(title[i]).width;
+    const yOff = Math.sin(t*3 + i*0.3) * 5;
+    ctx.fillText(title[i], startX + ctx.measureText(title.substring(0,i)).width + charW/2, H*0.42 + yOff);
+  }
+
+  // Sparkles around title
+  for (let i = 0; i < 12; i++) {
+    const a = t*0.5 + i*(Math.PI*2/12);
+    const r = 140 + Math.sin(t*2+i)*20;
+    const sx = W/2 + Math.cos(a)*r;
+    const sy = H*0.38 + Math.sin(a)*r*0.3;
+    ctx.globalAlpha = 0.5 + Math.sin(t*4+i)*0.3;
+    drawStar(sx, sy, 4+Math.sin(t*3+i)*2, 4, colors[i%colors.length]);
+  }
+  ctx.globalAlpha = 1;
+
+  // Subtitle
+  ctx.fillStyle = '#fff';
+  ctx.font = `${Math.min(22, W*0.04)}px sans-serif`;
+  ctx.fillText('A Magical Rainbow Adventure!', W/2, H*0.52);
+
+  // Tap to play
+  const pulse = 0.7 + Math.sin(t*3)*0.3;
+  ctx.globalAlpha = pulse;
+  ctx.fillStyle = '#ffd700';
+  ctx.font = `bold ${Math.min(28, W*0.05)}px sans-serif`;
+  ctx.fillText('🌟 Tap to Play! 🌟', W/2, H*0.68);
+  ctx.globalAlpha = 1;
+
+  // Bottom decorations
+  ctx.font = '30px sans-serif';
+  ctx.fillText('🌈  ⭐  💖  ✨  🌈', W/2, H*0.82);
+
+  ctx.restore();
+}
+
+// --- Draw Win/Lose ---
+function drawEndScreen() {
+  drawBackground();
+
+  // Fireworks
+  fireworks.forEach(f => {
+    ctx.globalAlpha = f.life;
+    ctx.fillStyle = f.color;
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, f.size, 0, Math.PI*2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+
+  // Particles
+  particles.forEach(p => {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    if (p.type === 'star') drawStar(p.x, p.y, p.size, 4, p.color);
+    else { ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill(); }
+  });
+  ctx.globalAlpha = 1;
+
+  ctx.textAlign = 'center';
+
+  if (gameState === 'win') {
+    // Dancing unicorn (bounce)
+    const bounce = Math.abs(Math.sin(winTime*5))*20;
+    ctx.font = `${70+Math.sin(winTime*3)*10}px sans-serif`;
+    ctx.fillText('🦄', W/2, H*0.32 - bounce);
+
+    // Big rainbow
+    ctx.font = '60px sans-serif';
+    ctx.fillText('🌈', W/2, H*0.18);
+
+    // You did it!
+    const colors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
+    ctx.font = `bold ${Math.min(48, W*0.08)}px sans-serif`;
+    const msg = 'YOU DID IT!';
+    const mw = ctx.measureText(msg);
+    const sx = W/2 - mw.width/2;
+    for (let i = 0; i < msg.length; i++) {
+      ctx.fillStyle = colors[Math.floor((i+winTime*5) % colors.length)];
+      const cw = ctx.measureText(msg[i]).width;
+      const yOff = Math.sin(winTime*4+i*0.4)*8;
+      ctx.fillText(msg[i], sx + ctx.measureText(msg.substring(0,i)).width + cw/2, H*0.48 + yOff);
+    }
+
+    ctx.fillStyle = '#fff';
+    ctx.font = `${Math.min(24, W*0.04)}px sans-serif`;
+    ctx.fillText(`Score: ${score} ✨`, W/2, H*0.58);
+    ctx.fillText('The rainbow is SO proud of you!', W/2, H*0.65);
+    ctx.font = '30px sans-serif';
+    ctx.fillText('🎉 🦄 🌈 ⭐ 💖 🎉', W/2, H*0.74);
+  } else {
+    // Gentle lose
+    ctx.font = '60px sans-serif';
+    ctx.fillText('🌈', W/2, H*0.25);
+    ctx.font = '50px sans-serif';
+    ctx.fillText('🦄', W/2, H*0.38);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.min(32, W*0.06)}px sans-serif`;
+    ctx.fillText('Almost there!', W/2, H*0.52);
+    ctx.font = `${Math.min(22, W*0.04)}px sans-serif`;
+    ctx.fillText('The rainbow believes in you! 🌈', W/2, H*0.60);
+    ctx.fillText(`You collected ${Math.floor(energy)}/${WIN_ENERGY} rainbow energy!`, W/2, H*0.67);
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `bold ${Math.min(20, W*0.035)}px sans-serif`;
+    ctx.fillText(`Score: ${score} ✨`, W/2, H*0.74);
+  }
+
+  if (winTime > 2) {
+    const pulse = 0.7 + Math.sin(winTime*3)*0.3;
+    ctx.globalAlpha = pulse;
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `bold ${Math.min(24, W*0.04)}px sans-serif`;
+    ctx.fillText('🌟 Tap to Play Again! 🌟', W/2, H*0.88);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// --- Main Draw ---
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  if (gameState === 'title') { drawTitle(); return; }
+  if (gameState === 'win' || gameState === 'lose') { drawEndScreen(); return; }
+
+  // Shake
+  ctx.save();
+  if (shakeAmount > 0.5) {
+    ctx.translate((Math.random()-0.5)*shakeAmount, (Math.random()-0.5)*shakeAmount);
+  }
+
+  drawBackground();
+
+  // Rainbow trail
+  if (unicorn.trail.length > 1) {
+    const trailColors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
+    unicorn.trail.forEach((t, i) => {
+      if (i === 0) return;
+      ctx.globalAlpha = t.life * 0.5;
+      ctx.strokeStyle = trailColors[i % trailColors.length];
+      ctx.lineWidth = t.life * 6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(unicorn.trail[i-1].x, unicorn.trail[i-1].y);
+      ctx.lineTo(t.x, t.y);
+      ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  // Swirls
+  swirls.forEach(drawSwirl);
+
+  // Powerups
+  powerups.forEach(drawPowerup);
+
+  // Orbiting stars
+  unicorn.orbStars.forEach(s => {
+    const sx = unicorn.x + Math.cos(s.angle)*s.dist;
+    const sy = unicorn.y + Math.sin(s.angle)*s.dist;
+    drawStar(sx, sy, 6, 4, '#ffd700');
+  });
+
+  // Unicorn
+  drawUnicorn(unicorn.x, unicorn.y, unicorn.angle, unicorn.sparkle);
+
+  // Particles
+  particles.forEach(p => {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    if (p.type === 'star') drawStar(p.x, p.y, p.size, 4, p.color);
+    else { ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill(); }
+  });
+  ctx.globalAlpha = 1;
+
+  // Flash effect
+  if (flashAlpha > 0.01) {
+    ctx.fillStyle = `rgba(255,255,255,${flashAlpha})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  ctx.restore();
+
+  drawHUD();
+}
+
+// --- Loop ---
+function gameLoop(timestamp) {
+  const dt = Math.min(0.05, (timestamp - lastTime) / 1000);
+  lastTime = timestamp;
+  update(dt);
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+// --- Start ---
+initBG();
+requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>

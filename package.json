@@ -1,0 +1,8 @@
+{
+  "name": "eating-unicorn-rainbows",
+  "version": "1.0.0",
+  "description": "A magical rainbow-eating unicorn game for kids!",
+  "scripts": {
+    "start": "npx serve -s . -l 3000"
+  }
+}
