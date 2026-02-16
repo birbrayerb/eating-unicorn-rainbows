@@ -553,43 +553,74 @@ function drawUnicorn(x, y, facing, sparkle) {
   ctx.restore();
 }
 
-// --- Draw Rainbow Swirl ---
+// --- Draw Rainbow Collectible ---
 function drawSwirl(s) {
   const by = Math.sin(s.bobPhase)*8;
   ctx.save();
   ctx.translate(s.x, s.y + by);
-  ctx.rotate(s.rotation);
+  ctx.rotate(s.rotation * 0.3); // gentle tilt
   ctx.globalAlpha = s.alpha;
 
+  const r = s.radius;
+
   // Glow
-  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, s.radius*1.5);
-  grad.addColorStop(0, s.color + '40');
-  grad.addColorStop(1, s.color + '00');
+  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, r*2);
+  grad.addColorStop(0, 'rgba(255,200,255,0.25)');
+  grad.addColorStop(1, 'rgba(255,200,255,0)');
   ctx.fillStyle = grad;
-  ctx.beginPath(); ctx.arc(0, 0, s.radius*1.5, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(0, -r*0.2, r*2, 0, Math.PI*2); ctx.fill();
 
-  // Spiral
-  ctx.strokeStyle = s.color;
-  ctx.lineWidth = s.isGold ? 4 : 3;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  for (let t = 0; t < Math.PI*4; t += 0.15) {
-    const r = (t / (Math.PI*4)) * s.radius;
-    const px = Math.cos(t) * r;
-    const py = Math.sin(t) * r;
-    if (t === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
-  }
-  ctx.stroke();
-
-  // Center dot
-  ctx.fillStyle = s.isGold ? '#fff' : s.color;
-  ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI*2); ctx.fill();
-
-  // Gold sparkle
   if (s.isGold) {
-    drawStar(s.radius*0.5, -s.radius*0.5, 5, 4, '#ffd700');
-    drawStar(-s.radius*0.4, s.radius*0.3, 3, 4, '#ffec80');
+    // Gold rainbow — shimmering gold arc
+    const goldColors = ['#fff8dc','#ffd700','#ffb800','#ff9500','#ffd700','#fff8dc'];
+    ctx.lineCap = 'round';
+    goldColors.forEach((c, i) => {
+      const arcR = r - i*2.5;
+      if (arcR <= 0) return;
+      ctx.strokeStyle = c;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, r*0.3, arcR, Math.PI, 0);
+      ctx.stroke();
+    });
+    // Sparkles on gold rainbow
+    for (let i = 0; i < 5; i++) {
+      const a = Math.PI + (i/4)*Math.PI;
+      const sr = r - 6;
+      const sx = Math.cos(a)*sr;
+      const sy = r*0.3 + Math.sin(a)*sr;
+      ctx.globalAlpha = s.alpha * (0.4 + Math.sin(Date.now()/200+i*1.5)*0.4);
+      drawStar(sx, sy, 4, 4, '#fff');
+    }
+    ctx.globalAlpha = s.alpha;
+  } else {
+    // Rainbow arc — the classic 🌈
+    const rainbowColors = ['#ff0000','#ff8800','#ffdd00','#00cc44','#0088ff','#8844ff','#cc44cc'];
+    ctx.lineCap = 'round';
+    rainbowColors.forEach((c, i) => {
+      const arcR = r - i*2.2;
+      if (arcR <= 2) return;
+      ctx.strokeStyle = c;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, r*0.3, arcR, Math.PI, 0);
+      ctx.stroke();
+    });
+
+    // Tiny clouds at rainbow feet
+    ctx.fillStyle = '#fff';
+    ctx.globalAlpha = s.alpha * 0.7;
+    ctx.beginPath(); ctx.ellipse(-r+2, r*0.3, 6, 4, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(r-2, r*0.3, 6, 4, 0, 0, Math.PI*2); ctx.fill();
+    ctx.globalAlpha = s.alpha;
+  }
+
+  // Shimmer particles around rainbow
+  const shimmer = Math.sin(Date.now()/300 + s.bobPhase);
+  if (shimmer > 0.5) {
+    ctx.globalAlpha = s.alpha * (shimmer - 0.5)*1.5;
+    drawStar(r*0.6, -r*0.4, 3, 4, '#ffd700');
+    drawStar(-r*0.5, -r*0.3, 2, 4, '#ff6b9d');
   }
 
   ctx.globalAlpha = 1;
