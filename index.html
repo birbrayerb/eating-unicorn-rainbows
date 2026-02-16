@@ -2268,83 +2268,37 @@ function drawTitle() {
   const rowStartX = (W - totalRowW) / 2;
   const rowY = btnY + btnH + 20;
 
-  // START
-  _startBtn = { x: rowStartX, y: rowY, w: rowBtnW, h: rowBtnH };
-  const pulse = 0.8 + Math.sin(t*3)*0.2;
-  ctx.shadowColor = '#4dff88'; ctx.shadowBlur = 15 * pulse;
-  const startGrad = ctx.createLinearGradient(rowStartX, rowY, rowStartX+rowBtnW, rowY);
-  startGrad.addColorStop(0, '#4dff88'); startGrad.addColorStop(1, '#00cc66');
-  ctx.fillStyle = startGrad;
-  ctx.beginPath(); ctx.roundRect(rowStartX, rowY, rowBtnW, rowBtnH, rowBtnH/2); ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#fff';
-  ctx.font = `bold ${Math.min(15, W*0.03)}px sans-serif`;
-  ctx.fillText('🏁 START', rowStartX + rowBtnW/2, rowY + rowBtnH*0.65);
-
-  // DAILY
-  const dailyX = rowStartX + rowBtnW + 8;
-  _dailyBtn = { x: dailyX, y: rowY, w: rowBtnW, h: rowBtnH };
-  ctx.shadowColor = '#ff9e4d'; ctx.shadowBlur = 12 * pulse;
-  const dailyGrad = ctx.createLinearGradient(dailyX, rowY, dailyX+rowBtnW, rowY);
-  dailyGrad.addColorStop(0, '#ff9e4d'); dailyGrad.addColorStop(1, '#ff6b35');
-  ctx.fillStyle = dailyGrad;
-  ctx.beginPath(); ctx.roundRect(dailyX, rowY, rowBtnW, rowBtnH, rowBtnH/2); ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#fff';
-  ctx.font = `bold ${Math.min(15, W*0.03)}px sans-serif`;
-  ctx.fillText('📅 DAILY', dailyX + rowBtnW/2, rowY + rowBtnH*0.65);
-
-  // ENDLESS — disabled for now
+  // START + DAILY buttons
   _endlessBtn = null;
-  if (false) {
-  const endlessX = dailyX + rowBtnW + 8;
-  _endlessBtn = { x: endlessX, y: rowY, w: rowBtnW, h: rowBtnH };
-  ctx.shadowColor = '#c44dff'; ctx.shadowBlur = 15 * pulse;
-  const endlessGrad = ctx.createLinearGradient(endlessX, rowY, endlessX+rowBtnW, rowY);
-  endlessGrad.addColorStop(0, '#c44dff'); endlessGrad.addColorStop(1, '#8b00ff');
-  ctx.fillStyle = endlessGrad;
-  ctx.beginPath(); ctx.roundRect(endlessX, rowY, rowBtnW, rowBtnH, rowBtnH/2); ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#fff';
-  ctx.font = `bold ${Math.min(15, W*0.03)}px sans-serif`;
-  ctx.fillText('♾️ ENDLESS', endlessX + rowBtnW/2, rowY + rowBtnH*0.65);
-  } // end disabled endless
-
-  // Make START and DAILY wider and centered without endless
+  const pulse = 0.8 + Math.sin(t*3)*0.2;
   const startDailyW = Math.min(160, W*0.38);
   const startDailyTotalW = startDailyW * 2 + 12;
   const sdStartX = (W - startDailyTotalW) / 2;
-  
-  // Reposition START
+
+  // START
   _startBtn = { x: sdStartX, y: rowY, w: startDailyW, h: rowBtnH };
-  ctx.clearRect(rowStartX, rowY, totalRowW, rowBtnH);
-  // Redraw bg
-  const bgGrad2 = ctx.createLinearGradient(0, 0, 0, H);
-  bgGrad2.addColorStop(0, '#1a0a2e'); bgGrad2.addColorStop(1, '#2d1050');
-  ctx.fillStyle = bgGrad2; ctx.fillRect(sdStartX - 5, rowY - 2, startDailyTotalW + 10, rowBtnH + 4);
-  
   ctx.shadowColor = '#4dff88'; ctx.shadowBlur = 15 * pulse;
-  const sg2 = ctx.createLinearGradient(sdStartX, rowY, sdStartX+startDailyW, rowY);
-  sg2.addColorStop(0, '#4dff88'); sg2.addColorStop(1, '#00cc66');
-  ctx.fillStyle = sg2;
+  const startGrad = ctx.createLinearGradient(sdStartX, rowY, sdStartX+startDailyW, rowY);
+  startGrad.addColorStop(0, '#4dff88'); startGrad.addColorStop(1, '#00cc66');
+  ctx.fillStyle = startGrad;
   ctx.beginPath(); ctx.roundRect(sdStartX, rowY, startDailyW, rowBtnH, rowBtnH/2); ctx.fill();
   ctx.shadowBlur = 0;
   ctx.fillStyle = '#fff';
   ctx.font = `bold ${Math.min(16, W*0.035)}px sans-serif`;
   ctx.fillText('🏁 START', sdStartX + startDailyW/2, rowY + rowBtnH*0.65);
 
-  // Reposition DAILY
-  const dailyX2 = sdStartX + startDailyW + 12;
-  _dailyBtn = { x: dailyX2, y: rowY, w: startDailyW, h: rowBtnH };
+  // DAILY
+  const dailyX = sdStartX + startDailyW + 12;
+  _dailyBtn = { x: dailyX, y: rowY, w: startDailyW, h: rowBtnH };
   ctx.shadowColor = '#ff9e4d'; ctx.shadowBlur = 12 * pulse;
-  const dg2 = ctx.createLinearGradient(dailyX2, rowY, dailyX2+startDailyW, rowY);
-  dg2.addColorStop(0, '#ff9e4d'); dg2.addColorStop(1, '#ff6b35');
-  ctx.fillStyle = dg2;
-  ctx.beginPath(); ctx.roundRect(dailyX2, rowY, startDailyW, rowBtnH, rowBtnH/2); ctx.fill();
+  const dailyGrad = ctx.createLinearGradient(dailyX, rowY, dailyX+startDailyW, rowY);
+  dailyGrad.addColorStop(0, '#ff9e4d'); dailyGrad.addColorStop(1, '#ff6b35');
+  ctx.fillStyle = dailyGrad;
+  ctx.beginPath(); ctx.roundRect(dailyX, rowY, startDailyW, rowBtnH, rowBtnH/2); ctx.fill();
   ctx.shadowBlur = 0;
   ctx.fillStyle = '#fff';
   ctx.font = `bold ${Math.min(16, W*0.035)}px sans-serif`;
-  ctx.fillText('📅 DAILY', dailyX2 + startDailyW/2, rowY + rowBtnH*0.65);
+  ctx.fillText('📅 DAILY', dailyX + startDailyW/2, rowY + rowBtnH*0.65);
 
   // Shop button
   const shopBtnW = Math.min(100, W*0.25);
