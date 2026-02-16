@@ -21,7 +21,16 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 
 let W, H;
-function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+const DPR = window.devicePixelRatio || 1;
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
 resize();
 window.addEventListener('resize', resize);
 
