@@ -868,26 +868,9 @@ function drawTitle() {
     ctx.fillText(d.label, bx+singleBtnW/2, by+btnH*0.72);
   });
 
-  // Leaderboard tabs
-  const lbY = btnY + btnH + 20;
+  // Leaderboard (shows scores for selected difficulty — tap a difficulty button to switch)
   _lbTabBtns = [];
-  const tabW = Math.min(60, W*0.12);
-  const tabH = 22;
-  const tabTotalW = DIFFICULTY_ORDER.length * (tabW+4);
-  const tabStartX = (W - tabTotalW)/2;
-  DIFFICULTY_ORDER.forEach((key, idx) => {
-    const d = DIFFICULTIES[key];
-    const tx = tabStartX + idx*(tabW+4);
-    const ty = lbY;
-    _lbTabBtns.push({ x: tx, y: ty, w: tabW, h: tabH, key });
-    ctx.fillStyle = key === selectedDifficultyForLB ? d.bg : 'rgba(255,255,255,0.1)';
-    ctx.beginPath(); ctx.roundRect(tx, ty, tabW, tabH, 6); ctx.fill();
-    ctx.fillStyle = key === selectedDifficultyForLB ? '#fff' : '#888';
-    ctx.font = `bold ${Math.min(10,tabW*0.18)}px sans-serif`;
-    ctx.fillText(`${d.emoji}`, tx+tabW/2, ty+tabH*0.7);
-  });
-
-  const scoresLbY = lbY + tabH + 8;
+  const scoresLbY = btnY + btnH + 18;
   const lbScores = leaderboards[selectedDifficultyForLB] || [];
   if (lbScores.length > 0) {
     ctx.fillStyle = '#ffd700';
