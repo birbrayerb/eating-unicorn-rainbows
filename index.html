@@ -1103,11 +1103,12 @@ function draw() {
     drawRainbow(screenX, screenY + bob, rb.type);
   });
 
-  // Draw finish rainbow if visible
+  // Draw finish rainbow — positioned so its base is at the unicorn Y when distance hits TRACK_LENGTH
   const finishRelY = (TRACK_LENGTH - distance) / viewRange;
-  if (finishRelY >= -0.1 && finishRelY <= 1.1) {
-    const finishScreenY = H * (1 - finishRelY * 0.85 - 0.08);
-    drawFinishRainbow(finishScreenY);
+  // Base of rainbow should land at unicorn position (H*0.72) when finishRelY=0
+  const finishBaseY = H * 0.72 - finishRelY * H * 0.85;
+  if (finishBaseY > -W*0.5 && finishBaseY < H + 50) {
+    drawFinishRainbow(finishBaseY);
   }
 
   // Draw unicorn
