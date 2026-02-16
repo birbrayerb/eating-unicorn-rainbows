@@ -2143,7 +2143,7 @@ function drawTitle() {
     const yOff = Math.sin(t*3+i*0.3)*3;
     ctx.fillText(title[i], startX+ctx.measureText(title.substring(0,i)).width+charW/2, y+titleSize+yOff);
   }
-  y += titleSize + 14;
+  y += titleSize + 24;
 
   // Instructions
   const instructions = [
@@ -2160,7 +2160,7 @@ function drawTitle() {
     ctx.fillText(`${inst.icon} ${inst.text}`, W/2, y + i*instrSpacing);
   });
   ctx.globalAlpha = 1;
-  y += instructions.length * instrSpacing + 8;
+  y += instructions.length * instrSpacing + 18;
 
   // Skin selector
   ctx.fillStyle = '#c9a0ff';
@@ -2205,7 +2205,7 @@ function drawTitle() {
       ctx.fillText('🔒', sx + skinSize/2, sy + skinSize/2 + skinSize*0.15);
     }
   });
-  y += skinSize + 4;
+  y += skinSize + 6;
 
   const nextSkin = SKINS.find(s => !isSkinUnlocked(s));
   if (nextSkin) {
@@ -2217,13 +2217,13 @@ function drawTitle() {
     ctx.font = `${Math.min(10, W*0.02)}px sans-serif`;
     ctx.fillText(`All skins unlocked! Total: ${cumulativeScore} pts ⭐`, W/2, y + 10);
   }
-  y += 20;
+  y += 28;
 
   // Difficulty buttons
   ctx.fillStyle = '#c9a0ff';
   ctx.font = `bold ${Math.min(13,W*0.026)}px sans-serif`;
   ctx.fillText('🌟 Pick difficulty! 🌟', W/2, y);
-  y += 14;
+  y += 18;
 
   const btnY = y;
   const btnGap = 6;
@@ -2266,7 +2266,7 @@ function drawTitle() {
   const rowBtnH = Math.min(46, H*0.058);
   const totalRowW = rowBtnW * 3 + 16;
   const rowStartX = (W - totalRowW) / 2;
-  const rowY = btnY + btnH + 12;
+  const rowY = btnY + btnH + 20;
 
   // START
   _startBtn = { x: rowStartX, y: rowY, w: rowBtnW, h: rowBtnH };
@@ -2310,7 +2310,7 @@ function drawTitle() {
   // Shop button
   const shopBtnW = Math.min(100, W*0.25);
   const shopBtnX = (W - shopBtnW) / 2;
-  const shopBtnY = rowY + rowBtnH + 10;
+  const shopBtnY = rowY + rowBtnH + 20;
   _shopBtn = { x: shopBtnX, y: shopBtnY, w: shopBtnW, h: 36 };
   ctx.fillStyle = '#e8a000';
   ctx.beginPath(); ctx.roundRect(shopBtnX, shopBtnY, shopBtnW, 36, 18); ctx.fill();
@@ -2326,7 +2326,7 @@ function drawTitle() {
     ctx.fillText(`Ready: ${pText}`, W/2, shopBtnY + 50);
   }
 
-  const afterShopY = shopBtnY + (purchasedItems.length > 0 ? 58 : 42);
+  const afterShopY = shopBtnY + (purchasedItems.length > 0 ? 66 : 52);
 
   // Missions
   ctx.fillStyle = '#ff9e4d';
@@ -2334,17 +2334,20 @@ function drawTitle() {
   ctx.fillText('🎯 Missions', W/2, afterShopY);
   
   missions.forEach((m, i) => {
-    const my = afterShopY + 14 + i * 16;
+    const my = afterShopY + 18 + i * 18;
     ctx.fillStyle = m.completed ? '#4dff88' : '#ccc';
     ctx.font = `${Math.min(11, W*0.022)}px sans-serif`;
     const check = m.completed ? '✅' : '⬜';
     ctx.fillText(`${check} ${m.desc} (+25🪙)`, W/2, my);
   });
 
-  const afterMissionsY = afterShopY + 14 + missions.length * 16 + 10;
+  const afterMissionsY = afterShopY + 18 + missions.length * 18 + 20;
 
   // Leaderboard
-  const scoresLbY = afterMissionsY;
+  ctx.fillStyle = '#ffd700';
+  ctx.font = `bold ${Math.min(14, W*0.028)}px sans-serif`;
+  ctx.fillText('🏆 Leaderboards 🏆', W/2, afterMissionsY);
+  const scoresLbY = afterMissionsY + 16;
   
   // LB tabs
   const lbTabs = [...DIFFICULTY_ORDER, 'endless'];
