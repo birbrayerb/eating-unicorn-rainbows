@@ -197,7 +197,7 @@ function spawnFirework(x, y) {
 
 // --- Input ---
 let keys = {};
-let touchLeft = false, touchRight = false;
+let touchTargetX = null; // finger X position — unicorn follows horizontally
 
 document.addEventListener('keydown', e => {
   keys[e.key.toLowerCase()] = true;
@@ -218,15 +218,15 @@ canvas.addEventListener('pointerdown', e => {
     if (winTime > 2) { resetToTitle(); return; }
     return;
   }
-  // Playing: left/right
-  if (e.clientX < W/2) touchLeft = true; else touchRight = true;
+  // Playing: unicorn follows finger horizontally
+  touchTargetX = e.clientX;
 });
 canvas.addEventListener('pointermove', e => {
   if (gameState !== 'playing') return;
-  // Update touch position in case finger slides
+  touchTargetX = e.clientX;
 });
-canvas.addEventListener('pointerup', e => { touchLeft = false; touchRight = false; });
-canvas.addEventListener('pointercancel', e => { touchLeft = false; touchRight = false; });
+canvas.addEventListener('pointerup', e => { touchTargetX = null; });
+canvas.addEventListener('pointercancel', e => { touchTargetX = null; });
 
 // --- Name Entry ---
 function handleNameClick(cx, cy) {
@@ -320,10 +320,16 @@ function update(dt) {
   moveDir = 0;
   if (keys['arrowleft'] || keys['a']) moveDir = -1;
   if (keys['arrowright'] || keys['d']) moveDir = 1;
-  if (touchLeft) moveDir = -1;
-  if (touchRight) moveDir = 1;
 
-  unicorn.x += moveDir * UNICORN_MOVE_SPEED * dt;
+  // Touch: smoothly move toward finger X position
+  if (touchTargetX !== null) {
+    const dx = touchTargetX - unicorn.x;
+    if (Math.abs(dx) > 3) {
+      unicorn.x += dx * 8 * dt; // smooth follow
+    }
+  } else {
+    unicorn.x += moveDir * UNICORN_MOVE_SPEED * dt;
+  }
   unicorn.x = Math.max(0.05, Math.min(0.95, unicorn.x));
 
   // Trail
@@ -756,7 +762,7 @@ function drawTitle() {
   // Instructions
   const instructions = [
     { icon: '🦄', text: 'Race upward to the Big Rainbow!', color: '#ff6b9d' },
-    { icon: '⬅➡', text: 'Tap left/right to move!', color: '#4dc9ff' },
+    { icon: '👆', text: 'Drag your finger to move!', color: '#4dc9ff' },
     { icon: '🌈', text: 'Collect rainbows for points!', color: '#ffd700' },
     { icon: '✨', text: 'Gold = 100, Big = 50, Small = 10', color: '#ffec80' },
     { icon: '🏆', text: 'Same track for everyone — compete!', color: '#4dff88' },
