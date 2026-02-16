@@ -792,13 +792,38 @@ function drawTitle() {
   const t = titleTime;
   ctx.textAlign = 'center';
 
-  // Unicorn emoji + Title on same area
+  // --- Layout: calculate all heights first, then center vertically ---
+  const titleSize = Math.min(28, W*0.05);
+  const instrSize = Math.min(14, W*0.028);
+  const instrSpacing = Math.min(22, H*0.032);
+  const btnH = Math.min(50, H*0.065);
+  const pickLabelH = 20;
+  const gap1 = 20; // after unicorn+title
+  const gap2 = 18; // after instructions
+  const gap3 = 24; // after "pick difficulty" label
+  const gap4 = 20; // after buttons before leaderboard
+
+  const instructions = [
+    { icon: '👆', text: 'Drag to move! Collect rainbows!', color: '#4dc9ff' },
+    { icon: '🌈', text: 'Gold=100  Big=50  Small=10', color: '#ffd700' },
+    { icon: '🏆', text: 'Same track for all — compete!', color: '#4dff88' },
+  ];
+
+  // Total content height
+  const unicornTitleH = 50 + titleSize + 5; // emoji + title
+  const instrBlockH = instructions.length * instrSpacing;
+  const totalH = unicornTitleH + gap1 + instrBlockH + gap2 + pickLabelH + gap3 + btnH + gap4 + 120; // 120 for leaderboard
+  const topY = Math.max(20, (H - totalH) / 2);
+
+  let y = topY;
+
+  // Unicorn emoji
   ctx.font = `${40+Math.sin(t*2)*3}px sans-serif`;
-  ctx.fillText('🦄', W/2, H*0.08);
+  ctx.fillText('🦄', W/2, y + 30);
+  y += 45;
 
   // Title rainbow letters
   const title = 'Eating Unicorn Rainbows';
-  const titleSize = Math.min(28, W*0.05);
   ctx.font = `bold ${titleSize}px sans-serif`;
   const colors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
   const metrics = ctx.measureText(title);
@@ -807,41 +832,34 @@ function drawTitle() {
     ctx.fillStyle = colors[Math.floor((i+t*3)%colors.length)];
     const charW = ctx.measureText(title[i]).width;
     const yOff = Math.sin(t*3+i*0.3)*3;
-    ctx.fillText(title[i], startX+ctx.measureText(title.substring(0,i)).width+charW/2, H*0.15+yOff);
+    ctx.fillText(title[i], startX+ctx.measureText(title.substring(0,i)).width+charW/2, y+titleSize+yOff);
   }
+  y += titleSize + gap1;
 
-  // Instructions — compact, 3 lines
-  const instructions = [
-    { icon: '👆', text: 'Drag to move! Collect rainbows!', color: '#4dc9ff' },
-    { icon: '🌈', text: 'Gold=100  Big=50  Small=10', color: '#ffd700' },
-    { icon: '🏆', text: 'Same track for all — compete!', color: '#4dff88' },
-  ];
-
-  const instrSize = Math.min(14, W*0.028);
-  const instrStartY = H*0.21;
-  const instrSpacing = Math.min(24, H*0.035);
-
+  // Instructions
   instructions.forEach((inst, i) => {
     const fadeStart = 0.3 + i*0.4;
     const alpha = Math.min(1, Math.max(0, (t-fadeStart)*2));
     ctx.globalAlpha = alpha;
     ctx.font = `bold ${instrSize}px sans-serif`;
     ctx.fillStyle = inst.color;
-    ctx.fillText(`${inst.icon} ${inst.text}`, W/2, instrStartY+i*instrSpacing);
+    ctx.fillText(`${inst.icon} ${inst.text}`, W/2, y + i*instrSpacing);
   });
   ctx.globalAlpha = 1;
+  y += instrBlockH + gap2;
+
+  // "Pick your difficulty" label
+  ctx.fillStyle = '#c9a0ff';
+  ctx.font = `bold ${Math.min(14,W*0.028)}px sans-serif`;
+  ctx.fillText('🌟 Pick your difficulty! 🌟', W/2, y);
+  y += gap3;
 
   // Difficulty buttons
-  const btnY = instrStartY + instructions.length*instrSpacing + 12;
-  const btnH = Math.min(48, H*0.06);
+  const btnY = y;
   const btnGap = 8;
   const totalBtnW = Math.min(W*0.92, 520);
   const singleBtnW = (totalBtnW - btnGap*(DIFFICULTY_ORDER.length-1)) / DIFFICULTY_ORDER.length;
   const btnStartX = (W - totalBtnW) / 2;
-
-  ctx.fillStyle = '#c9a0ff';
-  ctx.font = `bold ${Math.min(14,W*0.028)}px sans-serif`;
-  ctx.fillText('🌟 Pick your difficulty! 🌟', W/2, btnY - 6);
 
   _diffBtns = [];
   DIFFICULTY_ORDER.forEach((key, idx) => {
@@ -877,9 +895,9 @@ function drawTitle() {
     ctx.fillText(d.label, bx+singleBtnW/2, by+btnH*0.72);
   });
 
-  // Leaderboard (shows scores for selected difficulty — tap a difficulty button to switch)
+  // Leaderboard
   _lbTabBtns = [];
-  const scoresLbY = btnY + btnH + 18;
+  const scoresLbY = btnY + btnH + gap4;
   const lbScores = leaderboards[selectedDifficultyForLB] || [];
   if (lbScores.length > 0) {
     ctx.fillStyle = '#ffd700';
