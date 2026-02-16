@@ -76,10 +76,10 @@ function seededRandom(seed) {
 // --- Difficulty Levels ---
 const DIFFICULTIES = {
   easy:    { label: 'Easy',    emoji: '🌸', speed: 125, spacing: 60,  hitMult: 1.0,  seed: 42069, color: '#ffb6d9', bg: '#ff69b4', sway: false },
-  medium:  { label: 'Medium',  emoji: '⭐', speed: 160, spacing: 75,  hitMult: 0.85, seed: 31337, color: '#b69fff', bg: '#7c4dff', sway: false },
-  hard:    { label: 'Hard',    emoji: '🔥', speed: 200, spacing: 90,  hitMult: 0.7,  seed: 80085, color: '#ffb347', bg: '#ff6b35', sway: false },
-  extreme: { label: 'Extreme', emoji: '💀', speed: 250, spacing: 110, hitMult: 0.55, seed: 66642, color: '#ff4444', bg: '#8b0000', sway: false },
-  crazy:   { label: 'Crazy',   emoji: '🤯', speed: 320, spacing: 130, hitMult: 0.4,  seed: 99999, color: '#ff00ff', bg: '#222',    sway: true  },
+  medium:  { label: 'Medium',  emoji: '⭐', speed: 160, spacing: 75,  hitMult: 0.95, seed: 31337, color: '#b69fff', bg: '#7c4dff', sway: false },
+  hard:    { label: 'Hard',    emoji: '🔥', speed: 200, spacing: 90,  hitMult: 0.85, seed: 80085, color: '#ffb347', bg: '#ff6b35', sway: false },
+  extreme: { label: 'Extreme', emoji: '💀', speed: 250, spacing: 110, hitMult: 0.75, seed: 66642, color: '#ff4444', bg: '#8b0000', sway: false },
+  crazy:   { label: 'Crazy',   emoji: '🤯', speed: 320, spacing: 130, hitMult: 0.65, seed: 99999, color: '#ff00ff', bg: '#222',    sway: true  },
 };
 const DIFFICULTY_ORDER = ['easy','medium','hard','extreme','crazy'];
 let currentDifficulty = 'easy';
@@ -783,13 +783,13 @@ function drawTitle() {
   const t = titleTime;
   ctx.textAlign = 'center';
 
-  // Unicorn emoji
-  ctx.font = `${50+Math.sin(t*2)*4}px sans-serif`;
-  ctx.fillText('🦄', W/2, H*0.11);
+  // Unicorn emoji + Title on same area
+  ctx.font = `${40+Math.sin(t*2)*3}px sans-serif`;
+  ctx.fillText('🦄', W/2, H*0.08);
 
   // Title rainbow letters
   const title = 'Eating Unicorn Rainbows';
-  const titleSize = Math.min(32, W*0.055);
+  const titleSize = Math.min(28, W*0.05);
   ctx.font = `bold ${titleSize}px sans-serif`;
   const colors = ['#ff6b9d','#ff9e4d','#ffd700','#4dff88','#4dc9ff','#c44dff'];
   const metrics = ctx.measureText(title);
@@ -797,43 +797,33 @@ function drawTitle() {
   for (let i = 0; i < title.length; i++) {
     ctx.fillStyle = colors[Math.floor((i+t*3)%colors.length)];
     const charW = ctx.measureText(title[i]).width;
-    const yOff = Math.sin(t*3+i*0.3)*4;
-    ctx.fillText(title[i], startX+ctx.measureText(title.substring(0,i)).width+charW/2, H*0.20+yOff);
+    const yOff = Math.sin(t*3+i*0.3)*3;
+    ctx.fillText(title[i], startX+ctx.measureText(title.substring(0,i)).width+charW/2, H*0.15+yOff);
   }
 
-  // Subtitle
-  ctx.fillStyle = '#c9a0ff';
-  ctx.font = `${Math.min(16, W*0.03)}px sans-serif`;
-  ctx.fillText('🏁 Vertical Rainbow Race! 🏁', W/2, H*0.26);
-
-  // Instructions
+  // Instructions — compact, 3 lines
   const instructions = [
-    { icon: '🦄', text: 'Race upward to the Big Rainbow!', color: '#ff6b9d' },
-    { icon: '👆', text: 'Drag your finger to move!', color: '#4dc9ff' },
-    { icon: '🌈', text: 'Collect rainbows for points!', color: '#ffd700' },
-    { icon: '✨', text: 'Gold = 100, Big = 50, Small = 10', color: '#ffec80' },
-    { icon: '🏆', text: 'Same track for everyone — compete!', color: '#4dff88' },
+    { icon: '👆', text: 'Drag to move! Collect rainbows!', color: '#4dc9ff' },
+    { icon: '🌈', text: 'Gold=100  Big=50  Small=10', color: '#ffd700' },
+    { icon: '🏆', text: 'Same track for all — compete!', color: '#4dff88' },
   ];
 
-  const instrSize = Math.min(16, W*0.032);
-  const instrStartY = H*0.32;
-  const instrSpacing = Math.min(34, H*0.05);
+  const instrSize = Math.min(14, W*0.028);
+  const instrStartY = H*0.21;
+  const instrSpacing = Math.min(24, H*0.035);
 
   instructions.forEach((inst, i) => {
-    const fadeStart = 0.5 + i*0.5;
+    const fadeStart = 0.3 + i*0.4;
     const alpha = Math.min(1, Math.max(0, (t-fadeStart)*2));
-    const bob = Math.sin(t*2+i*0.8)*3;
     ctx.globalAlpha = alpha;
-    ctx.font = `${Math.min(22,W*0.04)}px sans-serif`;
-    ctx.fillText(inst.icon, W/2 - Math.min(150,W*0.3), instrStartY+i*instrSpacing+bob);
     ctx.font = `bold ${instrSize}px sans-serif`;
     ctx.fillStyle = inst.color;
-    ctx.fillText(inst.text, W/2+10, instrStartY+i*instrSpacing+bob);
+    ctx.fillText(`${inst.icon} ${inst.text}`, W/2, instrStartY+i*instrSpacing);
   });
   ctx.globalAlpha = 1;
 
   // Difficulty buttons
-  const btnY = instrStartY + instructions.length*instrSpacing + 15;
+  const btnY = instrStartY + instructions.length*instrSpacing + 12;
   const btnH = Math.min(48, H*0.06);
   const btnGap = 8;
   const totalBtnW = Math.min(W*0.92, 520);
