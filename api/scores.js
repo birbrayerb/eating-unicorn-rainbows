@@ -13,7 +13,9 @@ function getDifficulty(req) {
 
 async function readScores(difficulty) {
   try {
-    const res = await fetch(`${EC_URL}/item/scores_${difficulty}`);
+    const url = new URL(EC_URL);
+    url.pathname += `/item/scores_${difficulty}`;
+    const res = await fetch(url.toString());
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data) ? data : [];
