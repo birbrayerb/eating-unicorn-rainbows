@@ -7,39 +7,43 @@ const MAX_SCORES = 50;
 const VALID_DIFFICULTIES = ['easy', 'medium', 'hard', 'extreme', 'crazy', 'endless'];
 
 function getDifficulty(req) {
-  const d = (req.query?.difficulty || req.body?.difficulty || 'easy').toLowerCase();
+  const d = (req.query && req.query.difficulty || req.body && req.body.difficulty || 'easy').toLowerCase();
   return VALID_DIFFICULTIES.includes(d) ? d : 'easy';
 }
 
 async function readScores(difficulty) {
   try {
-    const url = new URL(EC_URL);
-    url.pathname += `/item/scores_${difficulty}`;
-    const res = await fetch(url.toString());
+    const base = EC_URL.split('?')[0];
+    const token = EC_URL.split('token=')[1];
+    const res = await fetch(base + '/item/scores_' + difficulty + '?token=' + token);
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data) ? data : [];
-  } catch { return []; }
+  } catch (e) {
+    console.error('readScores error:', e);
+    return [];
+  }
 }
 
 async function writeScores(difficulty, scores) {
-  const res = await fetch(`https://api.vercel.com/v1/edge-config/${EC_ID}/items`, {
+  const res = await fetch('https://api.vercel.com/v1/edge-config/' + EC_ID + '/items', {
     method: 'PATCH',
     headers: {
-      'Authorization': `Bearer ${API_TOKEN}`,
+      'Authorization': 'Bearer ' + API_TOKEN,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      items: [{ operation: 'upsert', key: `scores_${difficulty}`, value: scores }],
+      items: [{ operation: 'upsert', key: 'scores_' + difficulty, value: scores }],
     }),
   });
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Edge Config write failed: ${res.status} ${err}`);
+    console.error('writeScores error:', res.status, err);
+    throw new Error('Edge Config write failed: ' + res.status);
   }
 }
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -47,31 +51,38 @@ export default async function handler(req, res) {
 
   const difficulty = getDifficulty(req);
 
-  if (req.method === 'GET') {
-    const scores = await readScores(difficulty);
-    const top = [...scores].sort((a, b) => b.score - a.score).slice(0, 10);
-    return res.status(200).json({ scores: top, difficulty });
-  }
-
-  if (req.method === 'POST') {
-    const { name, score } = req.body || {};
-    if (!name || typeof score !== 'number') {
-      return res.status(400).json({ error: 'Need name and score' });
+  try {
+    if (req.method === 'GET') {
+      const scores = await readScores(difficulty);
+      const top = scores.sort(function(a, b) { return b.score - a.score; }).slice(0, 10);
+      return res.status(200).json({ scores: top, difficulty: difficulty });
     }
-    const clean = String(name).slice(0, 20).replace(/[<>]/g, '');
-    const now = new Date();
-    const date = `${now.getMonth() + 1}/${now.getDate()}`;
 
-    let scores = await readScores(difficulty);
-    scores.push({ name: clean, score, date });
-    scores.sort((a, b) => b.score - a.score);
-    scores = scores.slice(0, MAX_SCORES);
+    if (req.method === 'POST') {
+      const body = req.body || {};
+      const name = body.name;
+      const score = body.score;
+      if (!name || typeof score !== 'number') {
+        return res.status(400).json({ error: 'Need name and score' });
+      }
+      var clean = String(name).slice(0, 20).replace(/[<>]/g, '');
+      var now = new Date();
+      var date = (now.getMonth() + 1) + '/' + now.getDate();
 
-    await writeScores(difficulty, scores);
+      var scores = await readScores(difficulty);
+      scores.push({ name: clean, score: score, date: date });
+      scores.sort(function(a, b) { return b.score - a.score; });
+      scores = scores.slice(0, MAX_SCORES);
 
-    const top = scores.slice(0, 10);
-    return res.status(200).json({ scores: top, difficulty });
+      await writeScores(difficulty, scores);
+
+      var top = scores.slice(0, 10);
+      return res.status(200).json({ scores: top, difficulty: difficulty });
+    }
+
+    return res.status(405).end();
+  } catch (e) {
+    console.error('Handler error:', e);
+    return res.status(500).json({ error: 'Internal error' });
   }
-
-  return res.status(405).end();
-}
+};
