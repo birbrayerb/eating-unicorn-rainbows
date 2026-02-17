@@ -4,5 +4,8 @@
   "description": "A magical rainbow-eating unicorn game for kids!",
   "scripts": {
     "start": "npx serve -s . -l 3000"
+  },
+  "dependencies": {
+    "@vercel/kv": "^3.0.0"
   }
 }
