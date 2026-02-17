@@ -1,32 +1,34 @@
 // Vercel Serverless Function — Persistent Leaderboard via Edge Config
 
-const EC_ID = process.env.EDGE_CONFIG_ID;
-const API_TOKEN = process.env.VERCEL_API_TOKEN;
-const EC_URL = process.env.EDGE_CONFIG;
-const MAX_SCORES = 50;
-const VALID_DIFFICULTIES = ['easy', 'medium', 'hard', 'extreme', 'crazy', 'endless'];
+var EC_ID = process.env.EDGE_CONFIG_ID;
+var API_TOKEN = process.env.VERCEL_API_TOKEN;
+var EC_URL = process.env.EDGE_CONFIG;
+var MAX_SCORES = 50;
+var VALID_DIFFICULTIES = ['easy', 'medium', 'hard', 'extreme', 'crazy', 'endless'];
 
 function getDifficulty(req) {
-  const d = (req.query && req.query.difficulty || req.body && req.body.difficulty || 'easy').toLowerCase();
-  return VALID_DIFFICULTIES.includes(d) ? d : 'easy';
+  var d = ((req.query && req.query.difficulty) || (req.body && req.body.difficulty) || 'easy').toLowerCase();
+  return VALID_DIFFICULTIES.indexOf(d) >= 0 ? d : 'easy';
 }
 
 async function readScores(difficulty) {
   try {
-    const base = EC_URL.split('?')[0];
-    const token = EC_URL.split('token=')[1];
-    const res = await fetch(base + '/item/scores_' + difficulty + '?token=' + token);
+    // EC_URL format: https://edge-config.vercel.com/ecfg_xxx?token=yyy
+    var parts = EC_URL.split('?');
+    var url = parts[0] + '/item/scores_' + difficulty + '?' + parts[1];
+    var res = await fetch(url);
     if (!res.ok) return [];
-    const data = await res.json();
+    var data = await res.json();
     return Array.isArray(data) ? data : [];
   } catch (e) {
-    console.error('readScores error:', e);
+    console.error('readScores error:', e.message);
     return [];
   }
 }
 
 async function writeScores(difficulty, scores) {
-  const res = await fetch('https://api.vercel.com/v1/edge-config/' + EC_ID + '/items', {
+  var url = 'https://api.vercel.com/v1/edge-config/' + EC_ID + '/items';
+  var res = await fetch(url, {
     method: 'PATCH',
     headers: {
       'Authorization': 'Bearer ' + API_TOKEN,
@@ -37,7 +39,7 @@ async function writeScores(difficulty, scores) {
     }),
   });
   if (!res.ok) {
-    const err = await res.text();
+    var err = await res.text();
     console.error('writeScores error:', res.status, err);
     throw new Error('Edge Config write failed: ' + res.status);
   }
@@ -49,19 +51,31 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const difficulty = getDifficulty(req);
+  // Debug: log env var presence
+  console.log('ENV CHECK - EC_ID:', !!EC_ID, 'API_TOKEN:', !!API_TOKEN, 'EC_URL:', !!EC_URL);
+
+  if (!EC_ID || !API_TOKEN || !EC_URL) {
+    return res.status(500).json({ 
+      error: 'Missing env vars',
+      has_EC_ID: !!EC_ID,
+      has_API_TOKEN: !!API_TOKEN, 
+      has_EC_URL: !!EC_URL
+    });
+  }
+
+  var difficulty = getDifficulty(req);
 
   try {
     if (req.method === 'GET') {
-      const scores = await readScores(difficulty);
-      const top = scores.sort(function(a, b) { return b.score - a.score; }).slice(0, 10);
+      var scores = await readScores(difficulty);
+      var top = scores.sort(function(a, b) { return b.score - a.score; }).slice(0, 10);
       return res.status(200).json({ scores: top, difficulty: difficulty });
     }
 
     if (req.method === 'POST') {
-      const body = req.body || {};
-      const name = body.name;
-      const score = body.score;
+      var body = req.body || {};
+      var name = body.name;
+      var score = body.score;
       if (!name || typeof score !== 'number') {
         return res.status(400).json({ error: 'Need name and score' });
       }
@@ -69,21 +83,20 @@ module.exports = async function handler(req, res) {
       var now = new Date();
       var date = (now.getMonth() + 1) + '/' + now.getDate();
 
-      var scores = await readScores(difficulty);
-      scores.push({ name: clean, score: score, date: date });
-      scores.sort(function(a, b) { return b.score - a.score; });
-      scores = scores.slice(0, MAX_SCORES);
+      var allScores = await readScores(difficulty);
+      allScores.push({ name: clean, score: score, date: date });
+      allScores.sort(function(a, b) { return b.score - a.score; });
+      allScores = allScores.slice(0, MAX_SCORES);
 
-      await writeScores(difficulty, scores);
+      await writeScores(difficulty, allScores);
 
-      var top = scores.slice(0, 10);
+      var top = allScores.slice(0, 10);
       return res.status(200).json({ scores: top, difficulty: difficulty });
     }
 
     return res.status(405).end();
   } catch (e) {
-    console.error('Handler error:', e);
-    return res.status(500).json({ error: 'Internal error' });
+    console.error('Handler error:', e.message);
+    return res.status(500).json({ error: 'Internal error: ' + e.message });
   }
 };
-
